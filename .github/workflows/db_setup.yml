@@ -1,0 +1,31 @@
+name: Supabase Database Setup
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'setup_db.js'
+      - '.github/workflows/db_setup.yml'
+  workflow_dispatch:
+
+jobs:
+  setup-database:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Install Required Database Drivers
+        run: npm install pg dotenv
+
+      - name: Execute Supabase Database Schema Migration
+        env:
+          DATABASE_URL: "postgresql://postgres:Swaetczher9@db.jnnisjenjogcgzponmjl.supabase.co:5432/postgres"
+        run: node setup_db.js
