@@ -26,6 +26,7 @@ async function main() {
   try {
     // 1. Create rekber_rooms table
     console.log("Creating table 'rekber_rooms' if not exists...");
+    await client.query("DROP TABLE IF EXISTS rekber_rooms CASCADE;");
     await client.query(`
       CREATE TABLE IF NOT EXISTS rekber_rooms (
         id INT PRIMARY KEY,
@@ -42,6 +43,7 @@ async function main() {
         wd_account VARCHAR(255) DEFAULT '',
         buyer_done BOOLEAN DEFAULT FALSE,
         seller_done BOOLEAN DEFAULT FALSE,
+        chat_logs TEXT DEFAULT '{"buyer":[],"seller":[],"admin":[]}',
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
