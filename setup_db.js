@@ -80,8 +80,8 @@ async function main() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS rekber_stats (
         id INT PRIMARY KEY,
-        total_volume NUMERIC DEFAULT 34500000,
-        total_transactions INT DEFAULT 1420
+        total_volume NUMERIC DEFAULT 0,
+        total_transactions INT DEFAULT 0
       );
     `);
 

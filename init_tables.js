@@ -136,7 +136,7 @@ async function main() {
   const statsRes = await makeRequest('GET', '/rest/v1/rekber_stats?select=id');
   if (statsRes.status === 200 && statsRes.data.length === 0) {
     console.log("   Stats table is empty, seeding defaults...");
-    await insertData('rekber_stats', [{ id: 1, total_volume: 34500000, total_transactions: 1420 }]);
+    await insertData('rekber_stats', [{ id: 1, total_volume: 0, total_transactions: 0 }]);
   } else {
     console.log(`   ✅ Stats already seeded`);
   }
@@ -176,11 +176,11 @@ INSERT INTO rekber_rooms (id) VALUES (1),(2),(3),(4),(5) ON CONFLICT DO NOTHING;
 -- 2. rekber_stats table  
 CREATE TABLE IF NOT EXISTS rekber_stats (
   id INT PRIMARY KEY,
-  total_volume NUMERIC DEFAULT 34500000,
-  total_transactions INT DEFAULT 1420
+  total_volume NUMERIC DEFAULT 0,
+  total_transactions INT DEFAULT 0
 );
 INSERT INTO rekber_stats (id, total_volume, total_transactions) 
-VALUES (1, 34500000, 1420) ON CONFLICT DO NOTHING;
+VALUES (1, 0, 0) ON CONFLICT DO NOTHING;
 
 -- 3. rekber_history table
 CREATE TABLE IF NOT EXISTS rekber_history (
