@@ -5,6 +5,64 @@
    ==========================================================================
 */
 
+// --- Supabase Client Init ---
+const supabaseUrl = 'https://jnnisjenjogcgzponmjl.supabase.co';
+const supabaseKey = 'sb_publishable_8oqpmh57DL6l_9KL8RVOgQ_oAcN1S2Q';
+const supabase = window.supabase ? window.supabase.createClient(supabaseUrl, supabaseKey) : null;
+
+// Helper to push room updates to Supabase
+async function saveRoomToSupabase(roomId) {
+  if (!supabase) return;
+  const room = STATE.rooms[roomId - 1];
+  try {
+    const { error } = await supabase
+      .from('rekber_rooms')
+      .upsert({
+        id: roomId,
+        buyer: room.buyer,
+        seller: room.seller,
+        admin_joined: room.adminJoined,
+        status: room.status,
+        tx_state: room.txState,
+        nominal: Number(room.nominal || 0),
+        buyer_total: Number(room.buyerTotal || 0),
+        seller_total: Number(room.sellerTotal || 0),
+        buyer_uploaded_receipt: !!room.buyerUploadedReceipt,
+        admin_uploaded_receipt: !!room.adminUploadedReceipt,
+        wd_account: JSON.stringify(room.wdDetails || {}),
+        buyer_done: room.buyerDone,
+        seller_done: room.sellerDone,
+        chat_logs: JSON.stringify(room.chatLogs || {}),
+        updated_at: new Date().toISOString()
+      });
+    if (error) console.error('Error saving room to Supabase:', error);
+  } catch (e) {
+    console.error('Network error saving to Supabase:', e);
+  }
+}
+
+async function saveTxHistoryToSupabase(txId, roomId, buyer, seller, nominal, status) {
+  if (!supabase) return;
+  try {
+    await supabase.from('rekber_history').upsert({
+      tx_id: txId,
+      room_name: `ROOM ${roomId}`,
+      buyer: buyer,
+      seller: seller,
+      nominal: Number(nominal || 0),
+      status: status
+    });
+    
+    await supabase.from('rekber_stats').upsert({
+      id: 1,
+      total_volume: Number(STATE.totalVolume || 0),
+      total_transactions: Number(STATE.totalTransactions || 0)
+    });
+  } catch (e) {
+    console.error('Error saving tx history:', e);
+  }
+}
+
 // --- 1. Global Application State ---
 const STATE = {
   // Volume and counts
@@ -90,7 +148,7 @@ const STATE = {
 };
 
 // --- 2. Initializer & Clock ---
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   // Start clock
   setInterval(updateClock, 1000);
   updateClock();
@@ -100,6 +158,94 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Generate default logs and stats
   logEvent('info', 'System initialized. Multi-Device Escrow Simulator stands ready.');
+
+  // Fetch initial state from Supabase
+  if (supabase) {
+    logEvent('info', 'Connecting to Supabase Cloud Database...');
+    try {
+      // 1. Fetch Rooms
+      const { data: dbRooms, error: roomsErr } = await supabase.from('rekber_rooms').select('*').order('id');
+      if (!roomsErr && dbRooms && dbRooms.length > 0) {
+        dbRooms.forEach(dbRoom => {
+          const idx = dbRoom.id - 1;
+          STATE.rooms[idx] = {
+            ...STATE.rooms[idx],
+            buyer: dbRoom.buyer,
+            seller: dbRoom.seller,
+            adminJoined: dbRoom.admin_joined,
+            status: dbRoom.status,
+            txState: dbRoom.tx_state,
+            nominal: Number(dbRoom.nominal || 0),
+            buyerTotal: Number(dbRoom.buyer_total || 0),
+            sellerTotal: Number(dbRoom.seller_total || 0),
+            buyerUploadedReceipt: dbRoom.buyer_uploaded_receipt ? 'https://dummyimage.com/600x400/10b981/ffffff.png&text=BUKTI+TF+PEMBELI' : null,
+            adminUploadedReceipt: dbRoom.admin_uploaded_receipt ? 'https://dummyimage.com/600x400/ef4444/ffffff.png&text=BUKTI+TRANSFER' : null,
+            wdDetails: JSON.parse(dbRoom.wd_account || '{}'),
+            buyerDone: dbRoom.buyer_done,
+            sellerDone: dbRoom.seller_done,
+            chatLogs: JSON.parse(dbRoom.chat_logs || '{"buyer":[],"seller":[],"admin":[]}')
+          };
+        });
+        logEvent('success', 'Rooms successfully synchronized from Supabase Cloud!');
+      }
+
+      // 2. Fetch Stats
+      const { data: dbStats } = await supabase.from('rekber_stats').select('*').single();
+      if (dbStats) {
+        STATE.totalVolume = Number(dbStats.total_volume);
+        STATE.totalTransactions = Number(dbStats.total_transactions);
+      }
+
+      // 3. Fetch History
+      const { data: dbHistory } = await supabase.from('rekber_history').select('*').order('created_at', { ascending: false }).limit(20);
+      if (dbHistory && dbHistory.length > 0) {
+        STATE.history = dbHistory.map(h => ({
+          txId: h.tx_id,
+          room: h.room_name,
+          date: new Date(h.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) + ' | ' + new Date(h.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB',
+          buyer: h.buyer,
+          seller: h.seller,
+          nominal: Number(h.nominal),
+          status: h.status
+        }));
+      }
+
+      // 4. Subscribe to Realtime Updates on rekber_rooms
+      supabase
+        .channel('public:rekber_rooms')
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rekber_rooms' }, payload => {
+          const updated = payload.new;
+          console.log('Real-time database sync received:', updated);
+          const idx = updated.id - 1;
+          
+          STATE.rooms[idx] = {
+            ...STATE.rooms[idx],
+            buyer: updated.buyer,
+            seller: updated.seller,
+            adminJoined: updated.admin_joined,
+            status: updated.status,
+            txState: updated.tx_state,
+            nominal: Number(updated.nominal || 0),
+            buyerTotal: Number(updated.buyer_total || 0),
+            sellerTotal: Number(updated.seller_total || 0),
+            buyerUploadedReceipt: updated.buyer_uploaded_receipt ? 'https://dummyimage.com/600x400/10b981/ffffff.png&text=BUKTI+TF+PEMBELI' : null,
+            adminUploadedReceipt: updated.admin_uploaded_receipt ? 'https://dummyimage.com/600x400/ef4444/ffffff.png&text=BUKTI+TRANSFER' : null,
+            wdDetails: JSON.parse(updated.wd_account || '{}'),
+            buyerDone: updated.buyer_done,
+            sellerDone: updated.seller_done,
+            chatLogs: JSON.parse(updated.chat_logs || '{"buyer":[],"seller":[],"admin":[]}')
+          };
+          
+          logEvent('info', `Sync: Room ${updated.id} state updated via cloud realtime.`);
+          renderAll();
+        })
+        .subscribe();
+
+    } catch (e) {
+      logEvent('warning', `Supabase connection failed: ${e.message}`);
+    }
+  }
+
   
   // Initialize Telegram WebApp SDK
   if (window.Telegram && window.Telegram.WebApp) {
@@ -312,7 +458,7 @@ function handleJoinRoom(roomId, role) {
     sendChatMessage(roomId, role, 'bot', `Menunggu lawan transaksi Anda bergabung ke Room ${roomId}...`);
   }
   
-  renderAll();
+  saveRoomToSupabase(roomId); renderAll();
 }
 
 // Exit Room Handler
@@ -324,6 +470,7 @@ function handleExitRoom(roomId, role) {
   // Completely reset room variables to default empty state
   room.buyer = null;
   room.seller = null;
+  saveRoomToSupabase(roomId);
   room.adminJoined = false;
   room.status = 'empty';
   room.txState = 'select_role';
@@ -346,7 +493,7 @@ function handleExitRoom(roomId, role) {
     { sender: 'system', text: 'Menunggu panggilan bantuan aktif dari room transaksi...', time: '02:05' }
   ];
   
-  renderAll();
+  saveRoomToSupabase(roomId); renderAll();
 }
 
 function updateRoomStatus(roomId) {
@@ -377,7 +524,7 @@ function handleCallAdmin(roomId) {
     isPanggilan: true // Special flag to render Accept/Cancel
   });
   
-  renderAll();
+  saveRoomToSupabase(roomId); renderAll();
 }
 
 // Admin Accept Room Joining
@@ -391,7 +538,7 @@ function handleAdminAccept(roomId, accepted) {
     
     room.txState = 'waiting_admin_panggilan';
     room.chatLogs.admin = [{ sender: 'system', text: 'Menunggu panggilan bantuan aktif dari room transaksi...', time: '02:05' }];
-    renderAll();
+    saveRoomToSupabase(roomId); renderAll();
     return;
   }
   
@@ -418,7 +565,7 @@ function handleBuyerSubmitNominal(roomId, amount) {
   
   if (isNaN(amount) || amount <= 0) {
     sendChatMessage(roomId, 'buyer', 'bot', `⚠️ Nominal harus berupa angka positif!`);
-    renderAll();
+    saveRoomToSupabase(roomId); renderAll();
     return;
   }
   
@@ -470,7 +617,7 @@ function handleBuyerUploadReceipt(roomId) {
     receiptUrl: room.buyerUploadedReceipt
   });
   
-  renderAll();
+  saveRoomToSupabase(roomId); renderAll();
 }
 
 // Admin approves top-up
@@ -482,7 +629,7 @@ function handleAdminApproveTopup(roomId, approved) {
     sendChatMessage(roomId, 'buyer', 'bot', `❌ Bukti transfer Anda DITOLAK oleh Admin. Pastikan nominal dan struk valid lalu kirim ulang.`);
     room.txState = 'topup_receipt_pending';
     room.buyerUploadedReceipt = null;
-    renderAll();
+    saveRoomToSupabase(roomId); renderAll();
     return;
   }
   
@@ -512,7 +659,7 @@ function handleSellerDeliver(roomId) {
   
   sendChatMessage(roomId, 'admin', 'bot', `🚚 Penjual mengeklik 'Barang Sudah Dikirim'. Menunggu tanggapan Pembeli.`);
   
-  renderAll();
+  saveRoomToSupabase(roomId); renderAll();
 }
 
 // Buyer clicks "Barang Tidak Sesuai" (Dispute)
@@ -534,7 +681,7 @@ function handleBuyerDispute(roomId) {
     isDisputeAction: true
   });
   
-  renderAll();
+  saveRoomToSupabase(roomId); renderAll();
 }
 
 // Admin resolves dispute
@@ -557,7 +704,7 @@ function handleAdminResolveDispute(roomId, resolution) {
     sendChatMessage(roomId, 'admin', 'bot', `Dispute diselesaikan secara manual. Saldo disiapkan untuk ditarik Seller.`);
   }
   
-  renderAll();
+  saveRoomToSupabase(roomId); renderAll();
 }
 
 // --- 5.5 Buyer Refund Operations ---
@@ -565,7 +712,7 @@ function handleBuyerClickRefund(roomId) {
   const room = STATE.rooms[roomId - 1];
   room.txState = 'buyer_refund_form';
   logEvent('action', `Pembeli mengeklik tombol pengajuan rekening Refund.`);
-  renderAll();
+  saveRoomToSupabase(roomId); renderAll();
 }
 
 function handleBuyerSubmitRefund(roomId, refundInfo) {
@@ -573,7 +720,7 @@ function handleBuyerSubmitRefund(roomId, refundInfo) {
   
   if (!refundInfo || refundInfo.trim() === '') {
     sendChatMessage(roomId, 'buyer', 'bot', `⚠️ Mohon isi rekening refund dengan format lengkap!`);
-    renderAll();
+    saveRoomToSupabase(roomId); renderAll();
     return;
   }
   
@@ -617,7 +764,7 @@ function handleAdminApproveRefund(roomId) {
   
   sendChatMessage(roomId, 'admin', 'bot', `✅ Refund disetujui. Bukti transfer balik manual disebarkan.`);
   
-  renderAll();
+  saveRoomToSupabase(roomId); renderAll();
 }
 
 // Fast forward simulate the 2-hour Auto-Done timer
@@ -646,7 +793,7 @@ function handleBuyerAccept(roomId) {
   
   sendChatMessage(roomId, 'admin', 'bot', `📦 Pembeli menyetujui pelepasan dana. Saldo Penjual siap dicairkan.`);
   
-  renderAll();
+  saveRoomToSupabase(roomId); renderAll();
 }
 
 // Seller clicks Withdraw Saldo, opens form input
@@ -658,7 +805,7 @@ function handleSellerClickWithdraw(roomId) {
   
   sendChatMessage(roomId, 'seller', 'bot', `💸 **PENGAJUAN WITHDRAWAL**\nAnda akan menarik seluruh saldo Anda dari Room ${roomId}.\n\n📊 **SUMMARY WITHDRAW (POTONGAN 2.5%):**\n• Total Saldo Utama : Rp ${room.nominal.toLocaleString('id-ID')}\n• Potongan WD (2.5%) : Rp ${(room.nominal * 0.025).toLocaleString('id-ID')}\n--------------------------------------\n💰 **BERSIH DITERIMA : Rp ${room.sellerTotal.toLocaleString('id-ID')}**\n\nSilakan isi detail rekening Anda pada panel input di bawah!`);
   
-  renderAll();
+  saveRoomToSupabase(roomId); renderAll();
 }
 
 // Seller submits withdrawal details
@@ -667,7 +814,7 @@ function handleSellerSubmitWd(roomId, bankInfo) {
   
   if (!bankInfo || bankInfo.trim() === '') {
     sendChatMessage(roomId, 'seller', 'bot', `⚠️ Mohon isi rekening tujuan dengan format lengkap!`);
-    renderAll();
+    saveRoomToSupabase(roomId); renderAll();
     return;
   }
   
@@ -733,7 +880,7 @@ function handleAdminApproveWd(roomId) {
   // Update admin chat
   sendChatMessage(roomId, 'admin', 'bot', `✅ Pengajuan WD disetujui. Bukti transfer manual disebarkan.`);
   
-  renderAll();
+  saveRoomToSupabase(roomId); renderAll();
 }
 
 // Seller confirms receipt of funds
@@ -746,7 +893,7 @@ function handleSellerConfirmFunds(roomId) {
   sendChatMessage(roomId, 'seller', 'bot', `👍 Anda mengonfirmasi penerimaan dana. Terima kasih!\nSilakan klik tombol **DONE** untuk menuntaskan sesi.`);
   sendChatMessage(roomId, 'buyer', 'bot', `ℹ️ Penjual menyatakan telah menerima dana.`);
   
-  renderAll();
+  saveRoomToSupabase(roomId); renderAll();
 }
 
 // Buyer or Seller clicks DONE finalization
@@ -763,7 +910,7 @@ function handleDoneClick(roomId, role) {
     finalizeTransaction(roomId);
   } else {
     sendChatMessage(roomId, role, 'bot', `Menunggu pihak satunya mengeklik **DONE** untuk menutup room.`);
-    renderAll();
+    saveRoomToSupabase(roomId); renderAll();
   }
 }
 
@@ -796,6 +943,7 @@ function finalizeTransaction(roomId, isRefund = false) {
   
   // Mutate stats
   STATE.history.unshift(newTx);
+  saveTxHistoryToSupabase(txId, roomId, room.buyer, room.seller, room.nominal, isRefund ? '🔴 REFUNDED CANCEL' : '🟢 SUCCESS DONE');
   if (!isRefund) {
     STATE.totalVolume += room.nominal;
   }
