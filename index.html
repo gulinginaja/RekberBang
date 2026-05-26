@@ -2,265 +2,291 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Rekber Bang - Premium Virtual Escrow Dashboard & Simulator</title>
-  
-  <!-- SEO Meta Tags -->
-  <meta name="description" content="Dashboard Rekber Bang Digital - Sistem Escrow Virtual Teraman di Telegram. Transaksi 100% transparan, room terisolasi, pencegahan penipuan, dan history otomatis.">
-  <meta name="keywords" content="rekber, escrow, telegram bot, rekber bang, transaksi virtual, jualan online, keamanan transaksi">
-  
-  <!-- Icons and Fonts -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Rekber Bang — Escrow Digital Terpercaya</title>
+  <meta name="description" content="Sistem rekening bersama (rekber) digital yang aman, transparan, dan profesional. Lindungi transaksi online Anda bersama Rekber Bang.">
+  <meta name="theme-color" content="#0d1117">
+
+  <!-- Telegram Web App SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <!-- Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+
+  <!-- Supabase CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- Design System -->
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
-  <div class="app-container">
-    
-    <!-- 1. Header Bar -->
-    <header class="header-bar">
-      <div class="brand-section">
-        <div class="brand-icon">🛡️</div>
-        <div class="brand-title">
-          <h1>REKBER BANG DIGITAL</h1>
-          <p>Sistem Escrow Virtual Terintegrasi & Amanah</p>
+<div id="app">
+
+  <!-- ═══════════════════════════════════════════
+       TOP BAR
+  ═══════════════════════════════════════════ -->
+  <header class="top-bar" id="top-bar">
+    <div class="top-bar-brand">
+      <div class="top-bar-logo">🛡️</div>
+      <div>
+        <div class="top-bar-title">REKBER BANG</div>
+        <div class="top-bar-subtitle">Escrow Digital Terpercaya</div>
+      </div>
+    </div>
+    <div class="top-bar-user" id="user-chip">
+      <div class="user-avatar default" id="user-avatar-chip">?</div>
+      <span class="user-name" id="user-name-chip">Memuat...</span>
+    </div>
+  </header>
+
+  <!-- ═══════════════════════════════════════════
+       VIEW 1: LANDING (Home)
+  ═══════════════════════════════════════════ -->
+  <div class="view active scroll-area" id="view-home">
+
+    <!-- Hero Stats Banner -->
+    <div class="stats-banner fade-in">
+      <div class="stats-banner-label">🛡️ Platform Rekber #1</div>
+      <div class="stats-banner-title">Transaksi Aman,<br>100% Terjamin</div>
+      <div class="stats-banner-subtitle">Dana ditahan admin sampai kedua pihak puas</div>
+      <div class="stats-grid">
+        <div class="stat-item green">
+          <div class="stat-label">Total Volume</div>
+          <div class="stat-value" id="home-stat-volume">Rp 34,5 Jt</div>
+        </div>
+        <div class="stat-item blue">
+          <div class="stat-label">Transaksi Sukses</div>
+          <div class="stat-value" id="home-stat-tx">1.420 Tx</div>
         </div>
       </div>
-      <div class="status-summary" style="display: flex; gap: 1.5rem; font-size: 0.85rem;">
-        <div><i class="fa-solid fa-server" style="color: var(--accent-green); margin-right: 0.35rem;"></i> System: <span style="font-weight: 700; color: var(--accent-green);">ONLINE</span></div>
-        <div class="hide-mobile"><i class="fa-solid fa-clock" style="color: var(--text-secondary); margin-right: 0.35rem;"></i> Local Time: <span id="local-clock" style="font-weight: 600; color: #fff;">00:00:00</span></div>
+    </div>
+
+    <!-- Section: Available Rooms -->
+    <div class="section-header">
+      <span class="section-title">🚪 Pilih Room</span>
+      <span class="live-dot">Live</span>
+    </div>
+
+    <div class="rooms-list" id="rooms-list">
+      <!-- Rooms rendered by JS -->
+      <div class="skeleton" style="height:76px;border-radius:12px;"></div>
+      <div class="skeleton" style="height:76px;border-radius:12px;margin-top:10px;"></div>
+      <div class="skeleton" style="height:76px;border-radius:12px;margin-top:10px;"></div>
+    </div>
+
+    <!-- How it works -->
+    <div class="section-header">
+      <span class="section-title">ℹ️ Cara Kerja</span>
+    </div>
+
+    <div class="how-it-works" style="margin:0 16px 16px;">
+      <div class="steps-list">
+        <div class="step-item">
+          <div class="step-num">1</div>
+          <div class="step-text"><strong>Pilih room kosong</strong> — Masuk sebagai Pembeli atau Penjual</div>
+        </div>
+        <div class="step-item">
+          <div class="step-num">2</div>
+          <div class="step-text"><strong>Panggil Admin</strong> — Setelah kedua pihak masuk, panggil admin sebagai mediator</div>
+        </div>
+        <div class="step-item">
+          <div class="step-num">3</div>
+          <div class="step-text"><strong>Top-Up Dana</strong> — Pembeli transfer ke rekening admin. Admin tahan dana hingga barang diterima</div>
+        </div>
+        <div class="step-item">
+          <div class="step-num">4</div>
+          <div class="step-text"><strong>Kirim & Terima</strong> — Penjual kirim produk, pembeli konfirmasi penerimaan</div>
+        </div>
+        <div class="step-item">
+          <div class="step-num">5</div>
+          <div class="step-text"><strong>Withdraw</strong> — Dana dikirim ke penjual, transaksi selesai. Kedua pihak klik Done</div>
+        </div>
       </div>
-    </header>
+    </div>
 
-    <!-- 2. Main Dashboard & Simulator Layout -->
-    <main class="main-layout">
-      
-      <!-- COLUMN 1: LEFT PANEL (Stats & Public History) -->
-      <section class="left-panel">
-        
-        <!-- Live Stats Metric Card -->
-        <div class="stats-card">
-          <div class="card-title">
-            <i class="fa-solid fa-chart-line" style="color: var(--accent-cyan);"></i>
-            <span>Statistik Escrow Publik</span>
-          </div>
-          <div class="metric-grid">
-            <div class="metric-item cyan">
-              <span class="metric-label">Volume Transaksi</span>
-              <span class="metric-value" id="stat-total-volume">Rp 0</span>
-            </div>
-            <div class="metric-item green">
-              <span class="metric-label">Transaksi Berhasil</span>
-              <span class="metric-value" id="stat-total-tx">0 Transaksi</span>
-            </div>
-          </div>
+    <!-- Trust Signals -->
+    <div style="margin:0 16px 80px;">
+      <div class="alert info">
+        <i class="fa-solid fa-shield-halved"></i>
+        <div class="alert-text">
+          <strong>⚠️ ANTI-SCAM:</strong> Admin <strong>TIDAK PERNAH</strong> mengirim pesan DM duluan. Pastikan Anda hanya bertransaksi melalui tombol resmi di dalam room ini.
         </div>
+      </div>
+    </div>
 
-        <!-- Room Live Status Card -->
-        <div class="stats-card">
-          <div class="card-title">
-            <i class="fa-solid fa-door-open" style="color: var(--accent-cyan);"></i>
-            <span>Daftar Room Rekber</span>
-          </div>
-          <div class="room-status-list" id="room-list-container">
-            <!-- Room elements will be dynamically updated by JavaScript -->
-          </div>
+  </div><!-- /view-home -->
+
+
+  <!-- ═══════════════════════════════════════════
+       VIEW 2: ROOM (Transaction)
+  ═══════════════════════════════════════════ -->
+  <div class="view scroll-area" id="view-room">
+
+    <!-- Room Header -->
+    <div class="room-view-header">
+      <button class="room-back-btn" id="back-to-home-btn">
+        <i class="fa-solid fa-chevron-left"></i> Daftar Room
+      </button>
+      <div class="room-info-bar">
+        <div class="room-title-group">
+          <div class="room-num" id="room-view-title">Room 1</div>
+          <div id="room-view-role-tag" class="room-role-tag badge-empty">—</div>
         </div>
+        <div id="room-view-status-badge" class="room-badge badge-empty">KOSONG</div>
+      </div>
+    </div>
 
-        <!-- Public Transaction History Card -->
-        <div class="stats-card history-card">
-          <div class="card-title">
-            <i class="fa-solid fa-clock-rotate-left" style="color: var(--accent-cyan);"></i>
-            <span>History Transaksi Sukses</span>
-          </div>
-          <div class="history-search-container">
-            <input type="text" id="history-search" class="history-search-input" placeholder="Cari ID transaksi atau username...">
-          </div>
-          <div class="history-scrollable" id="history-list-container">
-            <!-- Dynamic transaction entries will go here -->
-          </div>
+    <!-- Progress Bar -->
+    <div class="tx-progress" id="tx-progress-bar">
+      <!-- Rendered by JS -->
+    </div>
+
+    <!-- Participants Row -->
+    <div class="tx-state-card" style="margin-bottom:0;">
+      <div class="participants-row" id="participants-row">
+        <!-- Rendered by JS -->
+      </div>
+    </div>
+
+    <div class="section-gap"></div>
+
+    <!-- State Card (changes per tx_state) -->
+    <div id="tx-state-section">
+      <!-- Rendered by JS based on current state -->
+    </div>
+
+    <!-- Nominal Summary (shown when nominal > 0) -->
+    <div id="nominal-section" style="display:none;">
+      <div class="nominal-display">
+        <div class="nominal-row">
+          <span class="nominal-label">Harga Produk</span>
+          <span class="nominal-value" id="nom-base">Rp 0</span>
         </div>
-
-      </section>
-
-      <!-- COLUMN 2: CENTER PANEL (Triple Mobile Simulator) -->
-      <section class="center-panel">
-        
-        <!-- Tab Bar for Mobile viewports where side-by-side isn't possible -->
-        <nav class="device-tabs" id="device-tab-bar">
-          <button class="device-tab-btn active" data-tab="buyer">Pembeli (Buyer)</button>
-          <button class="device-tab-btn" data-tab="seller">Penjual (Seller)</button>
-          <button class="device-tab-btn" data-tab="admin">Admin Panel</button>
-        </nav>
-
-        <div class="simulator-workspace">
-          
-          <!-- DEVICE 1: PEMBELI (BUYER) -->
-          <div class="phone-frame tab-active" id="frame-buyer">
-            <div class="phone-screen">
-              <header class="phone-header">
-                <div class="phone-user-info">
-                  <div class="phone-avatar buyer"><i class="fa-solid fa-user-tie"></i></div>
-                  <div class="phone-details">
-                    <span class="phone-name" id="buyer-username">@pembeli_grok</span>
-                    <span class="phone-status">online • ID: 123456</span>
-                  </div>
-                </div>
-                <span class="phone-badge-pill buyer">PEMBELI</span>
-              </header>
-              
-              <!-- Chat Container -->
-              <div class="phone-chat-body" id="buyer-chat-body">
-                <!-- Messages will be dynamically rendered here -->
-              </div>
-              
-              <!-- Dynamic Input Section overlay -->
-              <div class="phone-action-overlay" id="buyer-action-area" style="padding: 0 0.85rem 0.5rem 0.85rem; display: none;">
-                <!-- E.g., Top-up input pad or Upload screen -->
-              </div>
-              
-              <footer class="phone-footer">
-                <div class="phone-input-sim">Ketuk tombol di atas untuk berinteraksi...</div>
-                <button class="phone-send-btn"><i class="fa-solid fa-paper-plane"></i></button>
-              </footer>
-            </div>
-          </div>
-
-          <!-- DEVICE 2: PENJUAL (SELLER) -->
-          <div class="phone-frame" id="frame-seller">
-            <div class="phone-screen">
-              <header class="phone-header">
-                <div class="phone-user-info">
-                  <div class="phone-avatar seller"><i class="fa-solid fa-store"></i></div>
-                  <div class="phone-details">
-                    <span class="phone-name" id="seller-username">@aldi_kurniawan</span>
-                    <span class="phone-status">online • ID: 789101</span>
-                  </div>
-                </div>
-                <span class="phone-badge-pill seller">PENJUAL</span>
-              </header>
-              
-              <!-- Chat Container -->
-              <div class="phone-chat-body" id="seller-chat-body">
-                <!-- Messages will be dynamically rendered here -->
-              </div>
-              
-              <!-- Dynamic Input Section overlay -->
-              <div class="phone-action-overlay" id="seller-action-area" style="padding: 0 0.85rem 0.5rem 0.85rem; display: none;">
-                <!-- E.g., Withdrawal form -->
-              </div>
-              
-              <footer class="phone-footer">
-                <div class="phone-input-sim">Ketuk tombol di atas untuk berinteraksi...</div>
-                <button class="phone-send-btn"><i class="fa-solid fa-paper-plane"></i></button>
-              </footer>
-            </div>
-          </div>
-
-          <!-- DEVICE 3: ADMIN -->
-          <div class="phone-frame" id="frame-admin">
-            <div class="phone-screen">
-              <header class="phone-header">
-                <div class="phone-user-info">
-                  <div class="phone-avatar admin"><i class="fa-solid fa-shield-halved"></i></div>
-                  <div class="phone-details">
-                    <span class="phone-name">@Admin_RekberBang</span>
-                    <span class="phone-status">online • Administrator</span>
-                  </div>
-                </div>
-                <span class="phone-badge-pill admin">ADMIN</span>
-              </header>
-              
-              <!-- Chat Container -->
-              <div class="phone-chat-body" id="admin-chat-body">
-                <!-- Messages will be dynamically rendered here -->
-              </div>
-              
-              <!-- Dynamic Input Section overlay -->
-              <div class="phone-action-overlay" id="admin-action-area" style="padding: 0 0.85rem 0.5rem 0.85rem; display: none;">
-                <!-- E.g., Upload transfer receipt -->
-              </div>
-              
-              <footer class="phone-footer">
-                <div class="phone-input-sim">Ketuk tombol di atas untuk memantau...</div>
-                <button class="phone-send-btn"><i class="fa-solid fa-paper-plane"></i></button>
-              </footer>
-            </div>
-          </div>
-
+        <div class="nominal-row">
+          <span class="nominal-label" id="nom-fee-label">Fee Rekber (5%)</span>
+          <span class="nominal-value" id="nom-fee">Rp 0</span>
         </div>
-      </section>
-
-      <!-- COLUMN 3: RIGHT PANEL (Developer Event Logger & Walkthrough) -->
-      <section class="right-panel">
-        
-        <!-- Dev Log Card -->
-        <div class="console-card">
-          <div class="console-header">
-            <div class="console-title">
-              <i class="fa-solid fa-terminal" style="color: var(--accent-cyan);"></i>
-              <span>Telemetry & Event Logs</span>
-            </div>
-            <button class="console-clear-btn" id="console-clear">Clear Logs</button>
-          </div>
-          <div class="console-terminal" id="console-logs">
-            <!-- Event stream logs printed by JS -->
-          </div>
+        <hr class="nominal-divider">
+        <div class="nominal-row">
+          <span class="nominal-label" style="font-weight:700;color:var(--text-primary);">Total Transfer</span>
+          <span class="nominal-value highlight" id="nom-total">Rp 0</span>
         </div>
-
-        <!-- Quick Reset and Alur Walkthrough Card -->
-        <div class="guide-card">
-          <div class="card-title">
-            <i class="fa-solid fa-clipboard-list" style="color: var(--accent-cyan);"></i>
-            <span>Petunjuk Alur Simulasi</span>
-          </div>
-          
-          <div class="guide-step-list">
-            <div class="guide-step">
-              <div class="guide-number">1</div>
-              <span><strong>Join Room:</strong> Masuk Room 1 di Pembeli & Penjual. Status room akan terkunci <strong>LOCKED</strong>.</span>
-            </div>
-            <div class="guide-step">
-              <div class="guide-number">2</div>
-              <span><strong>Panggil Admin:</strong> Klik panggil admin, admin join dengan mengklik <strong>Accept & Join</strong>.</span>
-            </div>
-            <div class="guide-step">
-              <div class="guide-number">3</div>
-              <span><strong>Top-Up:</strong> Pembeli input nominal (otomatis +5% fee). Klik Kirim Bukti Transfer. Admin menyetujui.</span>
-            </div>
-            <div class="guide-step">
-              <div class="guide-number">4</div>
-              <span><strong>Kirim Barang:</strong> Penjual kirim produk & klik tombol Kirim. Pembeli klik Terima Barang.</span>
-            </div>
-            <div class="guide-step">
-              <div class="guide-number">5</div>
-              <span><strong>Withdraw:</strong> Penjual mengajukan WD (potongan 2.5%), isi rekening. Admin memproses & kirim bukti transfer.</span>
-            </div>
-            <div class="guide-step">
-              <div class="guide-number">6</div>
-              <span><strong>Done:</strong> Penjual konfirmasi terima uang. Keduanya klik Done untuk menyimpan data ke history!</span>
-            </div>
-          </div>
-          
-          <button class="reset-flow-btn" id="reset-sim-btn">
-            <i class="fa-solid fa-rotate-left"></i> Reset Simulasi Bot
-          </button>
+        <div class="nominal-row" id="seller-net-row" style="display:none;">
+          <span class="nominal-label">Penjual Terima (-2.5%)</span>
+          <span class="nominal-value green" id="nom-seller-net">Rp 0</span>
         </div>
+      </div>
+    </div>
 
-      </section>
+    <!-- Action Panel (dynamic buttons) -->
+    <div id="action-panel" class="action-panel">
+      <!-- Rendered by JS -->
+    </div>
 
-    </main>
+  </div><!-- /view-room -->
 
-    <!-- Footer -->
-    <footer class="footer-text">
-      <p>&copy; 2026 <strong>Rekber Bang</strong> Digital Escrow System. Rancang Bangun untuk Integritas Transaksi Komunitas.</p>
-    </footer>
 
+  <!-- ═══════════════════════════════════════════
+       VIEW 3: HISTORY
+  ═══════════════════════════════════════════ -->
+  <div class="view scroll-area" id="view-history">
+
+    <!-- Search Bar -->
+    <div style="padding-top:16px;">
+      <div class="search-bar">
+        <i class="fa-solid fa-magnifying-glass"></i>
+        <input type="text" id="history-search" placeholder="Cari nama atau ID transaksi...">
+      </div>
+    </div>
+
+    <div class="section-header">
+      <span class="section-title">📋 Riwayat Transaksi</span>
+      <span class="live-dot">Live</span>
+    </div>
+
+    <div class="history-list" id="history-list">
+      <!-- Rendered by JS -->
+    </div>
+
+  </div><!-- /view-history -->
+
+
+  <!-- ═══════════════════════════════════════════
+       BOTTOM NAV
+  ═══════════════════════════════════════════ -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" id="nav-home" onclick="App.navigate('home')">
+      <i class="fa-solid fa-house"></i>
+      <span class="nav-label">Beranda</span>
+    </button>
+    <button class="nav-btn" id="nav-room" onclick="App.navigate('room')" style="display:none;">
+      <i class="fa-solid fa-door-open"></i>
+      <span class="nav-label">Room Aktif</span>
+    </button>
+    <button class="nav-btn" id="nav-history" onclick="App.navigate('history')">
+      <i class="fa-solid fa-clock-rotate-left"></i>
+      <span class="nav-label">Riwayat</span>
+    </button>
+  </nav>
+
+
+  <!-- ═══════════════════════════════════════════
+       ROLE SELECTOR MODAL (Bottom Sheet)
+  ═══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="role-modal">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-title" id="role-modal-room-title">Masuk Room 1</div>
+      <div class="modal-subtitle">Pilih peran Anda dalam transaksi ini</div>
+      <div class="role-options">
+        <div class="role-option" id="role-buyer-opt" onclick="App.selectRole('buyer')">
+          <div class="role-icon-wrap buyer">👤</div>
+          <div class="role-info">
+            <div class="role-name">Pembeli (Buyer)</div>
+            <div class="role-desc">Saya akan membeli produk dan transfer dana ke admin</div>
+          </div>
+          <i class="fa-solid fa-chevron-right" style="color:var(--text-muted);font-size:13px;"></i>
+        </div>
+        <div class="role-option" id="role-seller-opt" onclick="App.selectRole('seller')">
+          <div class="role-icon-wrap seller">🏪</div>
+          <div class="role-info">
+            <div class="role-name">Penjual (Seller)</div>
+            <div class="role-desc">Saya akan menjual produk dan menunggu konfirmasi pembeli</div>
+          </div>
+          <i class="fa-solid fa-chevron-right" style="color:var(--text-muted);font-size:13px;"></i>
+        </div>
+      </div>
+      <button class="btn btn-ghost" onclick="App.closeRoleModal()">
+        <i class="fa-solid fa-xmark"></i> Batal
+      </button>
+    </div>
   </div>
 
-  <!-- Central application script -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="app.js"></script>
+
+  <!-- ═══════════════════════════════════════════
+       CONFIRM MODAL
+  ═══════════════════════════════════════════ -->
+  <div class="confirm-modal" id="confirm-modal">
+    <div class="confirm-box">
+      <div class="confirm-icon" id="confirm-icon">❓</div>
+      <div class="confirm-title" id="confirm-title">Konfirmasi</div>
+      <div class="confirm-desc" id="confirm-desc">Apakah Anda yakin?</div>
+      <div class="confirm-btns">
+        <button class="btn btn-ghost btn-sm" onclick="App.closeConfirm()">Batal</button>
+        <button class="btn btn-primary btn-sm" id="confirm-ok-btn" onclick="App.doConfirmAction()">Ya, Lanjutkan</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════
+       TOAST CONTAINER
+  ═══════════════════════════════════════════ -->
+  <div class="toast-container" id="toast-container"></div>
+
+</div><!-- /#app -->
+
+<script src="app.js"></script>
 </body>
 </html>

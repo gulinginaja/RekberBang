@@ -115,7 +115,7 @@ function answerCallbackQuery(callbackQueryId) {
 const inlineMenuMarkup = {
   inline_keyboard: [
     [
-      { text: "🚀 Buka WebApp Rekber", web_app: { url: "https://gulinginaja.github.io/RekberBang/" } }
+      { text: "🚀 Buka Mini App Rekber", web_app: { url: "https://gulinginaja.github.io/RekberBang/" } }
     ],
     [
       { text: "📊 Statistik Rekber", callback_data: "menu_stats" },
@@ -212,10 +212,10 @@ function handleGuideCommand(chatId) {
 function handleAdminCommand(chatId) {
   const adminMsg = `<b>📞 DIREKTORI HUBUNGI ADMIN</b>\n\n` +
     `Butuh bantuan mediasi manual, bantuan teknis, atau pertanyaan kerja sama? Hubungi kami langsung di:\n\n` +
-    `• 👑 <b>Telegram Founder/Admin:</b> @Admin_RekberBang\n` +
-    `• 🛡️ <b>Grup Support Resmi:</b> @RekberBangSupportGroup\n` +
-    `• 🕒 <b>Jam Operasional:</b> 24/7 Selalu Aktif Amanah\n\n` +
-    `<i>⚠️ HATI-HATI PENIPUAN! Admin kami TIDAK PERNAH mengirim pesan pertama kali (DM first) kepada Anda! Pastikan selalu memanggil Admin melalui tombol resmi di dalam kamar transaksi WebApp.</i>`;
+    `• 👑 <b>Telegram Admin:</b> @swaetczher2\n` +
+    `• 🛡️ <b>Username Resmi:</b> @swaetczher2\n` +
+    `• 🕒 <b>Jam Operasional:</b> Setiap Hari — Aktif & Amanah\n\n` +
+    `<i>⚠️ HATI-HATI PENIPUAN! Admin kami TIDAK PERNAH mengirim pesan pertama kali (DM first) kepada Anda! Pastikan selalu memanggil Admin melalui tombol resmi di dalam Mini App.</i>`;
   
   sendMessage(chatId, adminMsg, inlineMenuMarkup);
 }

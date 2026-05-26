@@ -1,1621 +1,1177 @@
-/* 
-   ==========================================================================
-   REKBER BANG - CENTRAL STATE MACHINE & REALTIME SIMULATOR LOGIC
-   Manages state for 5 Rooms, Buyer/Seller/Admin syncing, logs, and stats.
-   ==========================================================================
-*/
+/* ============================================================
+   REKBER BANG — REAL ESCROW SYSTEM v2.0
+   Production WebApp: Real Supabase DB, Telegram Identity,
+   Full Transaction State Machine
+   ============================================================ */
 
-// --- Supabase Client Init ---
-const supabaseUrl = 'https://jnnisjenjogcgzponmjl.supabase.co';
-const supabaseKey = 'sb_publishable_8oqpmh57DL6l_9KL8RVOgQ_oAcN1S2Q';
-const supabase = window.supabase ? window.supabase.createClient(supabaseUrl, supabaseKey) : null;
+'use strict';
 
-// Helper to push room updates to Supabase
-async function saveRoomToSupabase(roomId) {
-  if (!supabase) return;
-  const room = STATE.rooms[roomId - 1];
-  try {
-    const { error } = await supabase
-      .from('rekber_rooms')
-      .upsert({
-        id: roomId,
-        buyer: room.buyer,
-        seller: room.seller,
-        admin_joined: room.adminJoined,
-        status: room.status,
-        tx_state: room.txState,
-        nominal: Number(room.nominal || 0),
-        buyer_total: Number(room.buyerTotal || 0),
-        seller_total: Number(room.sellerTotal || 0),
-        buyer_uploaded_receipt: !!room.buyerUploadedReceipt,
-        admin_uploaded_receipt: !!room.adminUploadedReceipt,
-        wd_account: JSON.stringify(room.wdDetails || {}),
-        buyer_done: room.buyerDone,
-        seller_done: room.sellerDone,
-        chat_logs: JSON.stringify(room.chatLogs || {}),
-        updated_at: new Date().toISOString()
-      });
-    if (error) console.error('Error saving room to Supabase:', error);
-  } catch (e) {
-    console.error('Network error saving to Supabase:', e);
-  }
-}
-
-async function saveTxHistoryToSupabase(txId, roomId, buyer, seller, nominal, status) {
-  if (!supabase) return;
-  try {
-    await supabase.from('rekber_history').upsert({
-      tx_id: txId,
-      room_name: `ROOM ${roomId}`,
-      buyer: buyer,
-      seller: seller,
-      nominal: Number(nominal || 0),
-      status: status
-    });
-    
-    await supabase.from('rekber_stats').upsert({
-      id: 1,
-      total_volume: Number(STATE.totalVolume || 0),
-      total_transactions: Number(STATE.totalTransactions || 0)
-    });
-  } catch (e) {
-    console.error('Error saving tx history:', e);
-  }
-}
-
-// --- 1. Global Application State ---
-const STATE = {
-  // Volume and counts
-  totalVolume: 34500000,
-  totalTransactions: 1420,
-  
-  // Active Room state (Room 1 to 5)
-  rooms: Array.from({ length: 5 }, (_, i) => ({
-    id: i + 1,
-    buyer: null,        // username string
-    seller: null,       // username string
-    adminJoined: false,
-    status: 'empty',    // 'empty', 'half', 'locked'
-    
-    // Transaction phase state machine:
-    // 'select_role', 'waiting_member', 'waiting_admin_panggilan', 'topup_menu', 'topup_receipt_pending', 'verifying_topup',
-    // 'waiting_delivery', 'disputed', 'waiting_withdraw', 'withdraw_submitted', 'withdraw_receipt_pending', 'waiting_done', 'completed'
-    txState: 'select_role', 
-    
-    nominal: 0,
-    buyerTotal: 0,
-    sellerTotal: 0,
-    
-    buyerUploadedReceipt: null, // base64 or placeholder url
-    adminUploadedReceipt: null,
-    
-    wdDetails: {
-      accountNo: '',
-      bankName: '',
-      ownerName: ''
-    },
-    
-    buyerDone: false,
-    sellerDone: false,
-    
-    chatLogs: {
-      buyer: [],
-      seller: [],
-      admin: []
-    }
-  })),
-  
-  // Public History log database
-  history: [
-    {
-      txId: 'TX-98231',
-      room: 'ROOM 1',
-      date: '25 Mei 2026 | 19:45 WIB',
-      buyer: '@pem*******ok',
-      seller: '@ald***********an',
-      nominal: 100000,
-      status: '🟢 SUCCESS DONE'
-    },
-    {
-      txId: 'TX-98229',
-      room: 'ROOM 3',
-      date: '25 Mei 2026 | 14:20 WIB',
-      buyer: '@da*******12',
-      seller: '@ru*******an',
-      nominal: 45000,
-      status: '🟢 SUCCESS DONE'
-    },
-    {
-      txId: 'TX-98215',
-      room: 'ROOM 5',
-      date: '24 Mei 2026 | 21:10 WIB',
-      buyer: '@by*******_q',
-      seller: '@se*******_x',
-      nominal: 250000,
-      status: '🟢 SUCCESS DONE'
-    }
-  ],
-  
-  // Current Simulator focus (which room is active in the simulator mockup view)
-  activeRoomIndex: 0, // Room 1 (0-indexed)
-  
-  // User profiles
-  users: {
-    buyer: { username: '@pembeli_grok', id: '123456' },
-    seller: { username: '@aldi_kurniawan', id: '789101' },
-    admin: { username: '@Admin_RekberBang', id: 'ADMIN' }
-  }
+// ─── CONFIG ─────────────────────────────────────────────────
+const CONFIG = {
+  SUPABASE_URL:  'https://jnnisjenjogcgzponmjl.supabase.co',
+  SUPABASE_KEY:  'sb_publishable_8oqpmh57DL6l_9KL8RVOgQ_oAcN1S2Q',
+  ADMIN_USERNAME: '@swaetczher2',
+  ADMIN_DISPLAY:  'Admin Rekber',
+  ADMIN_ACCOUNT: {
+    method: 'DANA',
+    number: '08973814368',
+    name:   'Admin Rekber Bang'
+  },
+  FEE_BUYER:  0.05,   // 5% buyer fee (platform fee)
+  FEE_SELLER: 0.025,  // 2.5% seller WD fee
+  NUM_ROOMS:  5,
+  AUTO_DONE_MINUTES: 120,
 };
 
-// --- 2. Initializer & Clock ---
-document.addEventListener('DOMContentLoaded', async () => {
-  // Start clock
-  setInterval(updateClock, 1000);
-  updateClock();
-  
-  // Bind UI inputs and buttons
-  setupEventListeners();
-  
-  // Generate default logs and stats
-  logEvent('info', 'System initialized. Multi-Device Escrow Simulator stands ready.');
+// ─── SUPABASE CLIENT ────────────────────────────────────────
+const supabase = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY);
 
-  // Fetch initial state from Supabase
-  if (supabase) {
-    logEvent('info', 'Connecting to Supabase Cloud Database...');
-    try {
-      // 1. Fetch Rooms
-      const { data: dbRooms, error: roomsErr } = await supabase.from('rekber_rooms').select('*').order('id');
-      if (!roomsErr && dbRooms && dbRooms.length > 0) {
-        dbRooms.forEach(dbRoom => {
-          const idx = dbRoom.id - 1;
-          STATE.rooms[idx] = {
-            ...STATE.rooms[idx],
-            buyer: dbRoom.buyer,
-            seller: dbRoom.seller,
-            adminJoined: dbRoom.admin_joined,
-            status: dbRoom.status,
-            txState: dbRoom.tx_state,
-            nominal: Number(dbRoom.nominal || 0),
-            buyerTotal: Number(dbRoom.buyer_total || 0),
-            sellerTotal: Number(dbRoom.seller_total || 0),
-            buyerUploadedReceipt: dbRoom.buyer_uploaded_receipt ? 'https://dummyimage.com/600x400/10b981/ffffff.png&text=BUKTI+TF+PEMBELI' : null,
-            adminUploadedReceipt: dbRoom.admin_uploaded_receipt ? 'https://dummyimage.com/600x400/ef4444/ffffff.png&text=BUKTI+TRANSFER' : null,
-            wdDetails: JSON.parse(dbRoom.wd_account || '{}'),
-            buyerDone: dbRoom.buyer_done,
-            sellerDone: dbRoom.seller_done,
-            chatLogs: JSON.parse(dbRoom.chat_logs || '{"buyer":[],"seller":[],"admin":[]}')
-          };
-        });
-        logEvent('success', 'Rooms successfully synchronized from Supabase Cloud!');
+// ─── TELEGRAM SDK ────────────────────────────────────────────
+const tg = window.Telegram?.WebApp || null;
+if (tg) {
+  tg.ready();
+  tg.expand();
+}
+
+// ─── CURRENT USER ────────────────────────────────────────────
+const ME = (() => {
+  if (tg && tg.initDataUnsafe?.user) {
+    const u = tg.initDataUnsafe.user;
+    return {
+      id:       String(u.id),
+      username: u.username ? `@${u.username}` : u.first_name,
+      name:     `${u.first_name}${u.last_name ? ' ' + u.last_name : ''}`,
+      isAdmin:  u.username === 'swaetczher2',
+    };
+  }
+  // Dev fallback — open in browser
+  const saved = localStorage.getItem('rekber_dev_user');
+  if (saved) return JSON.parse(saved);
+  const devName = prompt('Dev Mode: Masukkan username Anda (tanpa @):') || 'devuser';
+  const devUser = { id: 'dev_' + devName, username: '@' + devName, name: devName, isAdmin: devName === 'swaetczher2' };
+  localStorage.setItem('rekber_dev_user', JSON.stringify(devUser));
+  return devUser;
+})();
+
+// ─── APP STATE ────────────────────────────────────────────────
+const State = {
+  rooms:        [],          // Array of room objects from Supabase
+  currentView:  'home',
+  currentRoomId: null,
+  myRole:       null,        // 'buyer' | 'seller' | 'admin'
+  confirmCallback: null,
+  pendingRoleRoomId: null,
+  historyData:  [],
+  realtimeChannel: null,
+};
+
+// ─── UTILITY HELPERS ─────────────────────────────────────────
+const fmt = {
+  currency: (n) => 'Rp ' + Number(n || 0).toLocaleString('id-ID'),
+  shortCurrency: (n) => {
+    n = Number(n || 0);
+    if (n >= 1e9) return 'Rp ' + (n / 1e9).toFixed(1) + ' M';
+    if (n >= 1e6) return 'Rp ' + (n / 1e6).toFixed(1) + ' Jt';
+    if (n >= 1e3) return 'Rp ' + (n / 1e3).toFixed(0) + ' Rb';
+    return 'Rp ' + n;
+  },
+  date: (d) => {
+    if (!d) return '—';
+    return new Date(d).toLocaleString('id-ID', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  },
+  initials: (name) => (name || '?').replace('@','').slice(0,2).toUpperCase(),
+};
+
+function toast(msg, type = 'info', duration = 3000) {
+  const icons = { success:'fa-circle-check', error:'fa-circle-xmark', info:'fa-circle-info', warning:'fa-triangle-exclamation' };
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.innerHTML = `<i class="fa-solid ${icons[type] || icons.info}"></i><span class="toast-msg">${msg}</span>`;
+  const container = document.getElementById('toast-container');
+  container.appendChild(t);
+  setTimeout(() => { t.classList.add('removing'); setTimeout(() => t.remove(), 250); }, duration);
+}
+
+function haptic(style = 'light') {
+  if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred(style);
+}
+
+function copyText(text, label = 'Teks') {
+  navigator.clipboard.writeText(text).then(() => toast(`${label} berhasil disalin!`, 'success', 2000));
+}
+
+function fmtAnon(username) {
+  if (!username) return '—';
+  const u = username.replace('@', '');
+  if (u.length <= 4) return '@' + u + '***';
+  return '@' + u.slice(0, 3) + '*'.repeat(Math.min(u.length - 3, 4));
+}
+
+// ─── DB HELPERS ───────────────────────────────────────────────
+async function fetchRooms() {
+  const { data, error } = await supabase
+    .from('rekber_rooms')
+    .select('*')
+    .order('id');
+  if (error) { console.error('fetchRooms:', error); return []; }
+  return data || [];
+}
+
+async function fetchRoom(id) {
+  const { data, error } = await supabase
+    .from('rekber_rooms')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (error) return null;
+  return data;
+}
+
+async function updateRoom(id, fields) {
+  const { error } = await supabase
+    .from('rekber_rooms')
+    .update({ ...fields, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) { console.error('updateRoom:', error); return false; }
+  return true;
+}
+
+async function fetchHistory() {
+  const { data, error } = await supabase
+    .from('rekber_history')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error) return [];
+  return data || [];
+}
+
+async function saveHistory(room) {
+  const txId = 'TX-' + Date.now().toString(36).toUpperCase();
+  await supabase.from('rekber_history').insert({
+    tx_id:     txId,
+    room_name: `ROOM ${room.id}`,
+    buyer:     fmtAnon(room.buyer),
+    seller:    fmtAnon(room.seller),
+    nominal:   room.nominal,
+    status:    'SUKSES',
+  });
+  // Update stats
+  const { data: stats } = await supabase.from('rekber_stats').select('*').eq('id', 1).single();
+  if (stats) {
+    await supabase.from('rekber_stats').update({
+      total_volume:       (stats.total_volume || 0) + Number(room.nominal),
+      total_transactions: (stats.total_transactions || 0) + 1,
+    }).eq('id', 1);
+  }
+}
+
+async function fetchStats() {
+  const { data } = await supabase.from('rekber_stats').select('*').eq('id', 1).single();
+  return data;
+}
+
+// ─── REALTIME ─────────────────────────────────────────────────
+function initRealtime() {
+  if (State.realtimeChannel) supabase.removeChannel(State.realtimeChannel);
+  State.realtimeChannel = supabase
+    .channel('rekber_rooms_changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'rekber_rooms' }, async (payload) => {
+      const updated = payload.new;
+      const idx = State.rooms.findIndex(r => r.id === updated.id);
+      if (idx >= 0) State.rooms[idx] = updated;
+      else State.rooms.push(updated);
+
+      if (State.currentView === 'home') renderRooms();
+      if (State.currentView === 'room' && State.currentRoomId === updated.id) {
+        await renderRoomView(updated);
       }
+    })
+    .subscribe();
+}
 
-      // 2. Fetch Stats
-      const { data: dbStats } = await supabase.from('rekber_stats').select('*').single();
-      if (dbStats) {
-        STATE.totalVolume = Number(dbStats.total_volume);
-        STATE.totalTransactions = Number(dbStats.total_transactions);
-      }
+// ─── NAVIGATION ───────────────────────────────────────────────
+const App = {
+  async navigate(view, roomId) {
+    State.currentView = view;
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
 
-      // 3. Fetch History
-      const { data: dbHistory } = await supabase.from('rekber_history').select('*').order('created_at', { ascending: false }).limit(20);
-      if (dbHistory && dbHistory.length > 0) {
-        STATE.history = dbHistory.map(h => ({
-          txId: h.tx_id,
-          room: h.room_name,
-          date: new Date(h.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) + ' | ' + new Date(h.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB',
-          buyer: h.buyer,
-          seller: h.seller,
-          nominal: Number(h.nominal),
-          status: h.status
-        }));
-      }
+    document.getElementById('view-' + view).classList.add('active');
+    const navBtn = document.getElementById('nav-' + view);
+    if (navBtn) navBtn.classList.add('active');
 
-      // 4. Subscribe to Realtime Updates on rekber_rooms
-      supabase
-        .channel('public:rekber_rooms')
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rekber_rooms' }, payload => {
-          const updated = payload.new;
-          console.log('Real-time database sync received:', updated);
-          const idx = updated.id - 1;
-          
-          STATE.rooms[idx] = {
-            ...STATE.rooms[idx],
-            buyer: updated.buyer,
-            seller: updated.seller,
-            adminJoined: updated.admin_joined,
-            status: updated.status,
-            txState: updated.tx_state,
-            nominal: Number(updated.nominal || 0),
-            buyerTotal: Number(updated.buyer_total || 0),
-            sellerTotal: Number(updated.seller_total || 0),
-            buyerUploadedReceipt: updated.buyer_uploaded_receipt ? 'https://dummyimage.com/600x400/10b981/ffffff.png&text=BUKTI+TF+PEMBELI' : null,
-            adminUploadedReceipt: updated.admin_uploaded_receipt ? 'https://dummyimage.com/600x400/ef4444/ffffff.png&text=BUKTI+TRANSFER' : null,
-            wdDetails: JSON.parse(updated.wd_account || '{}'),
-            buyerDone: updated.buyer_done,
-            sellerDone: updated.seller_done,
-            chatLogs: JSON.parse(updated.chat_logs || '{"buyer":[],"seller":[],"admin":[]}')
-          };
-          
-          logEvent('info', `Sync: Room ${updated.id} state updated via cloud realtime.`);
-          renderAll();
-        })
-        .subscribe();
-
-    } catch (e) {
-      logEvent('warning', `Supabase connection failed: ${e.message}`);
+    if (view === 'home')    { await renderHomeView(); }
+    if (view === 'room')    {
+      State.currentRoomId = roomId || State.currentRoomId;
+      const room = await fetchRoom(State.currentRoomId);
+      if (room) await renderRoomView(room);
     }
-  }
+    if (view === 'history') { await renderHistoryView(); }
+  },
 
-  
-  // Initialize Telegram WebApp SDK
-  if (window.Telegram && window.Telegram.WebApp) {
-    try {
-      const tg = window.Telegram.WebApp;
-      tg.ready();
-      tg.expand(); // Full screen inside Telegram
-      
-      logEvent('success', 'Telegram WebApp SDK connected successfully!');
-      
-      // Auto-theme adjustments
-      if (tg.colorScheme === 'light') {
-        logEvent('info', 'Telegram Light Theme detected.');
-      } else {
-        logEvent('info', 'Telegram Dark Theme detected.');
-      }
-      
-      // Attempt to load real Telegram User Data
-      const user = tg.initDataUnsafe?.user;
-      if (user) {
-        const username = user.username ? `@${user.username}` : `@${user.first_name}`;
-        const userId = user.id.toString();
-        
-        // Dynamically assign real Telegram User details to Buyer profile!
-        STATE.users.buyer.username = username;
-        STATE.users.buyer.id = userId;
-        
-        document.getElementById('buyer-username').innerText = username;
-        
-        const buyerStatusEl = document.querySelector('#frame-buyer .phone-status');
-        if (buyerStatusEl) {
-          buyerStatusEl.innerText = `online • ID: ${userId}`;
-        }
-        
-        logEvent('success', `Real Telegram User loaded: ${username} (ID: ${userId})`);
-      }
-    } catch (e) {
-      logEvent('warning', `Failed to initialize Telegram WebApp variables: ${e.message}`);
+  async openRoom(roomId) {
+    const room = await fetchRoom(roomId);
+    if (!room) return;
+
+    // Check if user is already in this room
+    const myU = ME.username;
+    if (room.buyer === myU) {
+      State.myRole = 'buyer';
+      document.getElementById('nav-room').style.display = '';
+      await App.navigate('room', roomId);
+      return;
     }
-  }
-  
-  logEvent('info', 'Load statistics: Rp 34,500,000 Volume, 1,420 Completed Tx.');
-  
-  // Reset/Initialize room 1 default state for quick onboarding
-  resetAllRooms();
-  
-  // Full Render
-  renderAll();
-});
-
-function updateClock() {
-  const clockEl = document.getElementById('local-clock');
-  if (clockEl) {
-    const now = new Date();
-    clockEl.innerText = now.toLocaleTimeString('id-ID', { hour12: false });
-  }
-}
-
-// --- 3. Telemetry Event Logger ---
-function logEvent(type, message) {
-  const container = document.getElementById('console-logs');
-  if (!container) return;
-  
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString('id-ID', { hour12: false });
-  
-  const line = document.createElement('div');
-  line.className = 'console-line';
-  
-  let tagClass = 'info';
-  let tagText = 'INFO';
-  
-  if (type === 'success') { tagClass = 'success'; tagText = 'SUCCESS'; }
-  else if (type === 'warning') { tagClass = 'warning'; tagText = 'WARNING'; }
-  else if (type === 'error') { tagClass = 'error'; tagText = 'DISPUTE'; }
-  else if (type === 'action') { tagClass = 'action'; tagText = 'ACTION'; }
-  
-  line.innerHTML = `
-    <span class="console-timestamp">[${timeStr}]</span>
-    <span class="console-tag ${tagClass}">${tagText}</span>
-    <span class="console-text">${message}</span>
-  `;
-  
-  container.appendChild(line);
-  container.scrollTop = container.scrollHeight;
-}
-
-// --- 4. Event Binding ---
-function setupEventListeners() {
-  // Clear telemetry button
-  document.getElementById('console-clear').addEventListener('click', () => {
-    document.getElementById('console-logs').innerHTML = '';
-    logEvent('info', 'Logs cleared.');
-  });
-  
-  // Reset Simulation Button
-  document.getElementById('reset-sim-btn').addEventListener('click', () => {
-    resetAllRooms();
-    STATE.totalVolume = 34500000;
-    STATE.totalTransactions = 1420;
-    STATE.history = STATE.history.slice(0, 3); // keep only initial 3
-    
-    logEvent('warning', 'Simulation environment reset back to defaults.');
-    renderAll();
-  });
-  
-  // Search history input
-  document.getElementById('history-search').addEventListener('input', (e) => {
-    renderHistory(e.target.value.trim());
-  });
-  
-  // Responsive Device Tab Switcher
-  const tabs = document.querySelectorAll('.device-tab-btn');
-  tabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-      tabs.forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      
-      const role = tab.getAttribute('data-tab');
-      document.querySelectorAll('.phone-frame').forEach(f => f.classList.remove('tab-active'));
-      
-      if (role === 'buyer') document.getElementById('frame-buyer').classList.add('tab-active');
-      else if (role === 'seller') document.getElementById('frame-seller').classList.add('tab-active');
-      else if (role === 'admin') document.getElementById('frame-admin').classList.add('tab-active');
-      
-      logEvent('info', `Switched responsive viewport tab focus to: ${role.toUpperCase()}`);
-    });
-  });
-}
-
-// --- 5. Logic Operations (State Mutations) ---
-
-function resetAllRooms() {
-  STATE.rooms = Array.from({ length: 5 }, (_, i) => ({
-    id: i + 1,
-    buyer: null,
-    seller: null,
-    adminJoined: false,
-    status: 'empty',
-    txState: 'select_role',
-    nominal: 0,
-    buyerTotal: 0,
-    sellerTotal: 0,
-    buyerUploadedReceipt: null,
-    adminUploadedReceipt: null,
-    wdDetails: { accountNo: '', bankName: '', ownerName: '' },
-    buyerDone: false,
-    sellerDone: false,
-    chatLogs: {
-      buyer: [
-        { sender: 'bot', text: '🛡️ **REKBER BANG DIGITAL** 🛡️\nHalo! Selamat datang di sistem Rekber Otomatis.\n\nSilakan tentukan role transaksi Anda di bawah ini.', time: '02:05' }
-      ],
-      seller: [
-        { sender: 'bot', text: '🛡️ **REKBER BANG DIGITAL** 🛡️\nHalo! Selamat datang di sistem Rekber Otomatis.\n\nSilakan tentukan role transaksi Anda di bawah ini.', time: '02:05' }
-      ],
-      admin: [
-        { sender: 'system', text: 'Menunggu panggilan bantuan aktif dari room transaksi...', time: '02:05' }
-      ]
+    if (room.seller === myU) {
+      State.myRole = 'seller';
+      document.getElementById('nav-room').style.display = '';
+      await App.navigate('room', roomId);
+      return;
     }
-  }));
-}
+    if (ME.isAdmin) {
+      State.myRole = 'admin';
+      document.getElementById('nav-room').style.display = '';
+      await App.navigate('room', roomId);
+      return;
+    }
 
-// Helper to push a chat message to a role
-function sendChatMessage(roomId, role, sender, text) {
-  const room = STATE.rooms[roomId - 1];
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-  
-  const msgObj = { sender, text, time: timeStr };
-  
-  if (role === 'all') {
-    room.chatLogs.buyer.push(msgObj);
-    room.chatLogs.seller.push(msgObj);
-    if (room.adminJoined) room.chatLogs.admin.push(msgObj);
-  } else {
-    room.chatLogs[role].push(msgObj);
+    // Room fully locked and user not inside
+    if (room.status === 'locked' && !ME.isAdmin) {
+      toast('Room ini sudah penuh (2/2)', 'warning');
+      return;
+    }
+
+    // Show role picker
+    State.pendingRoleRoomId = roomId;
+    document.getElementById('role-modal-room-title').textContent = `Masuk Room ${roomId}`;
+
+    // Hide seller option if seller slot taken
+    const sellerOpt = document.getElementById('role-seller-opt');
+    const buyerOpt  = document.getElementById('role-buyer-opt');
+    sellerOpt.style.display = room.seller ? 'none' : '';
+    buyerOpt.style.display  = room.buyer  ? 'none' : '';
+
+    document.getElementById('role-modal').classList.add('open');
+    haptic('medium');
+  },
+
+  async selectRole(role) {
+    const roomId = State.pendingRoleRoomId;
+    if (!roomId) return;
+    this.closeRoleModal();
+
+    const room = await fetchRoom(roomId);
+    if (!room) return;
+
+    // Validate slot still available
+    if (role === 'buyer' && room.buyer) { toast('Slot Pembeli sudah terisi!', 'error'); return; }
+    if (role === 'seller' && room.seller) { toast('Slot Penjual sudah terisi!', 'error'); return; }
+
+    State.myRole = role;
+
+    // Join room
+    const newData = {};
+    if (role === 'buyer')  newData.buyer  = ME.username;
+    if (role === 'seller') newData.seller = ME.username;
+
+    // Update status
+    const updatedRoom = { ...room, ...newData };
+    if (updatedRoom.buyer && updatedRoom.seller) {
+      newData.status   = 'locked';
+      newData.tx_state = 'waiting_admin_panggilan';
+    } else {
+      newData.status   = 'half';
+      newData.tx_state = 'waiting_member';
+    }
+
+    const ok = await updateRoom(roomId, newData);
+    if (!ok) { toast('Gagal join room, coba lagi', 'error'); return; }
+
+    toast(`Berhasil masuk sebagai ${role === 'buyer' ? 'Pembeli' : 'Penjual'}!`, 'success');
+    haptic('medium');
+    State.currentRoomId = roomId;
+    document.getElementById('nav-room').style.display = '';
+    await App.navigate('room', roomId);
+  },
+
+  closeRoleModal() {
+    document.getElementById('role-modal').classList.remove('open');
+  },
+
+  openConfirm(icon, title, desc, okLabel, okClass, callback) {
+    document.getElementById('confirm-icon').textContent = icon;
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-desc').textContent = desc;
+    const okBtn = document.getElementById('confirm-ok-btn');
+    okBtn.textContent = okLabel;
+    okBtn.className = `btn ${okClass} btn-sm`;
+    State.confirmCallback = callback;
+    document.getElementById('confirm-modal').classList.add('open');
+  },
+
+  closeConfirm() {
+    document.getElementById('confirm-modal').classList.remove('open');
+    State.confirmCallback = null;
+  },
+
+  doConfirmAction() {
+    this.closeConfirm();
+    if (State.confirmCallback) State.confirmCallback();
+  },
+
+  async leaveRoom() {
+    App.openConfirm('🚪', 'Keluar dari Room?',
+      'Apakah Anda yakin ingin keluar? Slot Anda akan dikosongkan kembali.',
+      'Keluar', 'btn-danger', async () => {
+        const room = await fetchRoom(State.currentRoomId);
+        if (!room) return;
+        const updates = {};
+        if (State.myRole === 'buyer')  updates.buyer  = null;
+        if (State.myRole === 'seller') updates.seller = null;
+
+        const remaining = (State.myRole === 'buyer' ? room.seller : room.buyer);
+        updates.status   = remaining ? 'half' : 'empty';
+        updates.tx_state = remaining ? 'waiting_member' : 'select_role';
+        updates.nominal  = 0;
+        updates.buyer_total = 0;
+        updates.seller_total = 0;
+
+        await updateRoom(State.currentRoomId, updates);
+        State.myRole = null;
+        State.currentRoomId = null;
+        document.getElementById('nav-room').style.display = 'none';
+        toast('Anda keluar dari room', 'info');
+        await App.navigate('home');
+      });
+  },
+};
+
+// ─── RENDER: HOME VIEW ────────────────────────────────────────
+async function renderHomeView() {
+  // Load stats
+  const stats = await fetchStats();
+  if (stats) {
+    document.getElementById('home-stat-volume').textContent = fmt.shortCurrency(stats.total_volume);
+    document.getElementById('home-stat-tx').textContent = Number(stats.total_transactions).toLocaleString('id-ID') + ' Tx';
   }
-}
 
-// Join Room handler
-function handleJoinRoom(roomId, role) {
-  const room = STATE.rooms[roomId - 1];
-  
-  if (role === 'buyer') {
-    if (room.buyer) return;
-    room.buyer = STATE.users.buyer.username;
-    logEvent('action', `User ${STATE.users.buyer.username} masuk ke ROOM ${roomId} sebagai PEMBELI.`);
-    sendChatMessage(roomId, 'buyer', 'user', `Masuk ke Room ${roomId} sebagai Pembeli.`);
-  } else if (role === 'seller') {
-    if (room.seller) return;
-    room.seller = STATE.users.seller.username;
-    logEvent('action', `User ${STATE.users.seller.username} masuk ke ROOM ${roomId} sebagai PENJUAL.`);
-    sendChatMessage(roomId, 'seller', 'user', `Masuk ke Room ${roomId} sebagai Penjual.`);
-  }
-  
-  // Calculate status
-  updateRoomStatus(roomId);
-  
-  // If both have joined, lock room and trigger live menu
-  if (room.buyer && room.seller) {
-    room.status = 'locked';
-    room.txState = 'waiting_admin_panggilan';
-    
-    logEvent('success', `ROOM ${roomId} LOCKS! Pembeli & Penjual telah bersiap. Saldo Room: Rp 0`);
-    
-    sendChatMessage(roomId, 'buyer', 'bot', `🚪 **ROOM ${roomId} - LIVE** 🚪\n\nStatus: Menunggu Panggilan Admin.\n\n👤 PEMBELI: ${room.buyer}\n👤 PENJUAL: ${room.seller}\n👑 ADMIN: ⏳ Menunggu Dipanggil...\n\n💰 STATUS SALDO:\n• Saldo Ditahan: Rp 0\n• Saldo Siap WD: Rp 0\n\nSilakan klik tombol **PANGGIL ADMIN** jika kedua pihak sudah janjian!`);
-    sendChatMessage(roomId, 'seller', 'bot', `🚪 **ROOM ${roomId} - LIVE** 🚪\n\nStatus: Menunggu Panggilan Admin.\n\n👤 PEMBELI: ${room.buyer}\n👤 PENJUAL: ${room.seller}\n👑 ADMIN: ⏳ Menunggu Dipanggil...\n\n💰 STATUS SALDO:\n• Saldo Ditahan: Rp 0\n• Saldo Siap WD: Rp 0\n\nSilakan klik tombol **PANGGIL ADMIN** jika kedua pihak sudah janjian!`);
-  } else {
-    room.txState = 'waiting_member';
-    sendChatMessage(roomId, role, 'bot', `Menunggu lawan transaksi Anda bergabung ke Room ${roomId}...`);
-  }
-  
-  saveRoomToSupabase(roomId); renderAll();
-}
-
-// Exit Room Handler
-function handleExitRoom(roomId, role) {
-  const room = STATE.rooms[roomId - 1];
-  
-  logEvent('warning', `User keluar dari ROOM ${roomId}. Room reset.`);
-  
-  // Completely reset room variables to default empty state
-  room.buyer = null;
-  room.seller = null;
-  saveRoomToSupabase(roomId);
-  room.adminJoined = false;
-  room.status = 'empty';
-  room.txState = 'select_role';
-  room.nominal = 0;
-  room.buyerTotal = 0;
-  room.sellerTotal = 0;
-  room.buyerUploadedReceipt = null;
-  room.adminUploadedReceipt = null;
-  room.wdDetails = { accountNo: '', bankName: '', ownerName: '' };
-  room.buyerDone = false;
-  room.sellerDone = false;
-  
-  room.chatLogs.buyer = [
-    { sender: 'bot', text: '🛡️ **REKBER BANG DIGITAL** 🛡️\nHalo! Selamat datang di sistem Rekber Otomatis.\n\nSilakan tentukan role transaksi Anda di bawah ini.', time: '02:05' }
-  ];
-  room.chatLogs.seller = [
-    { sender: 'bot', text: '🛡️ **REKBER BANG DIGITAL** 🛡️\nHalo! Selamat datang di sistem Rekber Otomatis.\n\nSilakan tentukan role transaksi Anda di bawah ini.', time: '02:05' }
-  ];
-  room.chatLogs.admin = [
-    { sender: 'system', text: 'Menunggu panggilan bantuan aktif dari room transaksi...', time: '02:05' }
-  ];
-  
-  saveRoomToSupabase(roomId); renderAll();
-}
-
-function updateRoomStatus(roomId) {
-  const room = STATE.rooms[roomId - 1];
-  if (room.buyer && room.seller) room.status = 'locked';
-  else if (room.buyer || room.seller) room.status = 'half';
-  else room.status = 'empty';
-}
-
-// Trigger calling administrator
-function handleCallAdmin(roomId) {
-  const room = STATE.rooms[roomId - 1];
-  room.txState = 'waiting_admin_panggilan';
-  
-  logEvent('action', `Room ${roomId} memicu sinyal: PANGGIL ADMIN. Mengirimkan notifikasi push ke Admin.`);
-  
-  sendChatMessage(roomId, 'buyer', 'bot', `⏳ Menghubungi Admin... Tunggu konfirmasi persetujuan.`);
-  sendChatMessage(roomId, 'seller', 'bot', `⏳ Menghubungi Admin... Tunggu konfirmasi persetujuan.`);
-  
-  // Admin receives the call log message
-  room.chatLogs.admin = [];
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-  room.chatLogs.admin.push({
-    sender: 'system',
-    text: `🚨 **NOTIFIKASI: Panggilan Rekber Baru!**\n🚪 Nomor Room: ROOM ${roomId}\n👤 Pembeli: ${room.buyer} (ID: ${STATE.users.buyer.id})\n👤 Penjual: ${room.seller} (ID: ${STATE.users.seller.id})\n\nSilakan terima panggilan untuk masuk ke Room sebagai penengah pihak ketiga.`,
-    time: timeStr,
-    isPanggilan: true // Special flag to render Accept/Cancel
-  });
-  
-  saveRoomToSupabase(roomId); renderAll();
-}
-
-// Admin Accept Room Joining
-function handleAdminAccept(roomId, accepted) {
-  const room = STATE.rooms[roomId - 1];
-  
-  if (!accepted) {
-    logEvent('warning', `Admin menolak panggilan ROOM ${roomId}.`);
-    sendChatMessage(roomId, 'buyer', 'bot', `❌ Admin membatalkan panggilan. Hubungi kembali jika diperlukan.`);
-    sendChatMessage(roomId, 'seller', 'bot', `❌ Admin membatalkan panggilan. Hubungi kembali jika diperlukan.`);
-    
-    room.txState = 'waiting_admin_panggilan';
-    room.chatLogs.admin = [{ sender: 'system', text: 'Menunggu panggilan bantuan aktif dari room transaksi...', time: '02:05' }];
-    saveRoomToSupabase(roomId); renderAll();
-    return;
-  }
-  
-  room.adminJoined = true;
-  room.txState = 'topup_menu';
-  
-  logEvent('success', `Admin @Admin_RekberBang bergabung ke ROOM ${roomId}. Ruang mediasi aktif.`);
-  
-  // Messages indicating Admin joined
-  sendChatMessage(roomId, 'buyer', 'bot', `👑 **Admin bergabung ke Room!**\nSilakan Pembeli mengajukan top-up nominal transaksi.`);
-  sendChatMessage(roomId, 'seller', 'bot', `👑 **Admin bergabung ke Room!**\nMenunggu Pembeli menginput harga produk digital.`);
-  
-  // Set Admin's room view
-  room.chatLogs.admin = [
-    { sender: 'bot', text: `🛡️ **ROOM ${roomId} - MONITORING PANEL** 🛡️\nStatus: Terhubung.\n\n👤 Pembeli: ${room.buyer}\n👤 Penjual: ${room.seller}\n\nMenunggu Pembeli memasukkan harga barang...`, time: '02:05' }
-  ];
-  
-  renderAll();
-}
-
-// Buyer submits price/nominal
-function handleBuyerSubmitNominal(roomId, amount) {
-  const room = STATE.rooms[roomId - 1];
-  
-  if (isNaN(amount) || amount <= 0) {
-    sendChatMessage(roomId, 'buyer', 'bot', `⚠️ Nominal harus berupa angka positif!`);
-    saveRoomToSupabase(roomId); renderAll();
-    return;
-  }
-  
-  room.nominal = amount;
-  room.buyerTotal = amount + (amount * 0.05); // 5% fee
-  room.sellerTotal = amount - (amount * 0.025); // 2.5% fee on final withdrawal
-  room.txState = 'topup_receipt_pending';
-  
-  logEvent('action', `Pembeli mengajukan harga barang Rp ${amount.toLocaleString('id-ID')}. Total Pembayaran (+5% Fee): Rp ${room.buyerTotal.toLocaleString('id-ID')}.`);
-  
-  sendChatMessage(roomId, 'buyer', 'bot', `💳 **MENU TOP-UP PEMBELI**\n\n💰 **RINGKASAN PEMBAYARAN:**\n• Harga Produk : Rp ${room.nominal.toLocaleString('id-ID')}\n• Fee Rekber (5%) : Rp ${(room.nominal * 0.05).toLocaleString('id-ID')}\n--------------------------------------\n➔ **TOTAL TRANSFER: Rp ${room.buyerTotal.toLocaleString('id-ID')}**\n\n📌 **SILAKAN TRANSFER MANUAL KE:**\n• DANA: 0812-3456-7890 (a.n ALDI)\n• BCA: 123-456-789 (a.n ALDI)\n\n⚠️ Jika sudah transfer, kirim bukti foto/screenshot dengan mengklik tombol upload di bawah!`);
-  
-  sendChatMessage(roomId, 'seller', 'bot', `⏳ Pembeli sedang menghitung nominal transaksi: Rp ${room.nominal.toLocaleString('id-ID')}.\nMenunggu Pembeli melakukan transfer manual ke Admin.`);
-  
-  sendChatMessage(roomId, 'admin', 'bot', `ℹ️ Pembeli menginput Nominal: Rp ${room.nominal.toLocaleString('id-ID')}.\nTotal yang wajib ditransfer Buyer (+5% fee): Rp ${room.buyerTotal.toLocaleString('id-ID')}.`);
-  
-  renderAll();
-}
-
-// Buyer uploads Receipt screenshot (Simulator automates the image)
-function handleBuyerUploadReceipt(roomId) {
-  const room = STATE.rooms[roomId - 1];
-  
-  // Create a simulated nice green payment receipt
-  room.buyerUploadedReceipt = `https://dummyimage.com/600x400/10b981/ffffff.png&text=BUKTI+TF+PEMBELI+Rp+${room.buyerTotal.toLocaleString('id-ID')}`;
-  room.txState = 'verifying_topup';
-  
-  logEvent('action', `Pembeli mengunggah bukti transfer sebesar Rp ${room.buyerTotal.toLocaleString('id-ID')}.`);
-  
-  // 1. Let the Buyer see their uploaded proof directly inside their chat logs
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-  room.chatLogs.buyer.push({
-    sender: 'user',
-    text: `Struk bukti transfer topup senilai Rp ${room.buyerTotal.toLocaleString('id-ID')}:`,
-    time: timeStr,
-    attachment: room.buyerUploadedReceipt
-  });
-  
-  // 2. Bot replies to buyer
-  sendChatMessage(roomId, 'buyer', 'bot', `📸 Bukti transfer berhasil dikirim!\nStatus: **SEDANG DIVERIFIKASI ADMIN**.`);
-  
-  // 3. Send notification to Admin phone
-  room.chatLogs.admin.push({
-    sender: 'system',
-    text: `🚨 **PEMBERITAHUAN BUKTI TRANSFER BUYER**\n🚪 Nomor Room: ROOM ${roomId}\n👤 Pembeli: ${room.buyer}\n💰 Nominal Transfer: **Rp ${room.buyerTotal.toLocaleString('id-ID')}**\n\nSistem mendeteksi bukti transfer dilampirkan.`,
-    time: timeStr,
-    isReceiptApproval: true,
-    receiptUrl: room.buyerUploadedReceipt
-  });
-  
-  saveRoomToSupabase(roomId); renderAll();
-}
-
-// Admin approves top-up
-function handleAdminApproveTopup(roomId, approved) {
-  const room = STATE.rooms[roomId - 1];
-  
-  if (!approved) {
-    logEvent('warning', `Admin menolak bukti transfer Buyer di ROOM ${roomId}.`);
-    sendChatMessage(roomId, 'buyer', 'bot', `❌ Bukti transfer Anda DITOLAK oleh Admin. Pastikan nominal dan struk valid lalu kirim ulang.`);
-    room.txState = 'topup_receipt_pending';
-    room.buyerUploadedReceipt = null;
-    saveRoomToSupabase(roomId); renderAll();
-    return;
-  }
-  
-  room.txState = 'waiting_delivery';
-  
-  logEvent('success', `Admin menyetujui transfer Buyer. Saldo Pending Penjual diaktifkan: Rp ${room.nominal.toLocaleString('id-ID')}`);
-  
-  sendChatMessage(roomId, 'buyer', 'bot', `✅ **Dana berhasil diamankan!**\nJumlah: Rp ${room.buyerTotal.toLocaleString('id-ID')}\n\nSilakan menunggu Penjual mengirimkan barang dagangannya.`);
-  
-  sendChatMessage(roomId, 'seller', 'bot', `📦 **MENU UTAMA PENJUAL**\n\nStatus Dana: 🟡 **PENDING (Dana Aman di Rekber)**\n\n💰 **DETAIL SALDO:**\n• Saldo Ditahan: Rp ${room.nominal.toLocaleString('id-ID')} (Milik Anda jika transaksi sukses)\n• Saldo Siap WD: Rp 0\n\n📢 **INSTRUKSI:**\nDana pembeli sudah masuk ke rekening Admin.\nSilakan kirimkan produk digital (OTP/Akun) Anda sekarang ke pembeli via chat Telegram.\n\nJika produk sudah dikirimkan secara utuh, klik tombol **BARANG SUDAH DIKIRIM** dibawah!`);
-  
-  sendChatMessage(roomId, 'admin', 'bot', `✅ Bukti topup disetujui. Dana sebesar Rp ${room.buyerTotal.toLocaleString('id-ID')} ditahan di rekening penampungan.`);
-  
-  renderAll();
-}
-
-// Seller delivers product
-function handleSellerDeliver(roomId) {
-  const room = STATE.rooms[roomId - 1];
-  room.txState = 'waiting_delivery_confirmation';
-  
-  logEvent('action', `Penjual mengonfirmasi bahwa produk digital telah dikirim.`);
-  
-  sendChatMessage(roomId, 'seller', 'bot', `📤 Status: **Menunggu Konfirmasi Penerimaan Pembeli**.\nTombol Withdraw akan aktif jika Pembeli menyetujui kualitas barang.`);
-  
-  sendChatMessage(roomId, 'buyer', 'bot', `📦 **Penjual menyatakan produk sudah dikirim!**\n\nSilakan periksa produk digital yang Anda terima. Pastikan semuanya sesuai dan bekerja dengan baik.\n\n⚠️ **WARNING:** Jangan konfirmasi jika barang belum diterima/tidak sesuai!`);
-  
-  sendChatMessage(roomId, 'admin', 'bot', `🚚 Penjual mengeklik 'Barang Sudah Dikirim'. Menunggu tanggapan Pembeli.`);
-  
-  saveRoomToSupabase(roomId); renderAll();
-}
-
-// Buyer clicks "Barang Tidak Sesuai" (Dispute)
-function handleBuyerDispute(roomId) {
-  const room = STATE.rooms[roomId - 1];
-  room.txState = 'disputed';
-  
-  logEvent('error', `ROOM ${roomId} MEMASUKI DISPUTE RESOLUTION! Pembeli melaporkan barang tidak sesuai.`);
-  
-  sendChatMessage(roomId, 'buyer', 'bot', `⚠️ **DISPUTE RESOLUTION DIAKTIFKAN!**\nTransaksi dibekukan. Admin telah menerima sinyal darurat dan akan melakukan peninjauan bukti di chat.`);
-  sendChatMessage(roomId, 'seller', 'bot', `⚠️ **TRANSAKSI DIBEKUKAN!**\nPembeli mengajukan komplain 'Barang Tidak Sesuai'. Saldo Anda ditahan sampai mediasi selesai.`);
-  
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-  room.chatLogs.admin.push({
-    sender: 'system',
-    text: `🚨 **DISPUTE ALERT - ROOM ${roomId}**\nPembeli melaporkan ketidaksesuaian barang. Rekber dibekukan sementara.\nSilakan lakukan mediasi manual dan ambil tindakan resolusi:`,
-    time: timeStr,
-    isDisputeAction: true
-  });
-  
-  saveRoomToSupabase(roomId); renderAll();
-}
-
-// Admin resolves dispute
-function handleAdminResolveDispute(roomId, resolution) {
-  const room = STATE.rooms[roomId - 1];
-  
-  if (resolution === 'refund') {
-    logEvent('success', `Admin menuntaskan dispute ROOM ${roomId}: REFUND PENUH KE PEMBELI.`);
-    sendChatMessage(roomId, 'buyer', 'bot', `🛡️ **MEDIASI SELESAI:** Admin menyetujui pembatalan & REFUND dana Anda.\n\nNominal tagihan top-up Anda (+5% fee dikembalikan utuh karena pembatalan bukan kesalahan Anda) sebesar **Rp ${room.buyerTotal.toLocaleString('id-ID')}** akan ditransfer balik manual oleh Admin.\n\nSilakan klik tombol di bawah untuk mengajukan rekening pengembalian!`);
-    sendChatMessage(roomId, 'seller', 'bot', `🛡️ **MEDIASI SELESAI:** Admin memutuskan REFUND ke Pembeli akibat transaksi batal/tidak jelas. Transaksi dihentikan.`);
-    
-    room.txState = 'buyer_refund_menu';
-  } else {
-    logEvent('success', `Admin menuntaskan dispute ROOM ${roomId}: LANJUTKAN WITHDRAW SELLER.`);
-    sendChatMessage(roomId, 'buyer', 'bot', `🛡️ **MEDIASI SELESAI:** Admin memutuskan barang sah sesuai deskripsi. Saldo dialokasikan ke Penjual.`);
-    
-    room.txState = 'waiting_withdraw';
-    
-    sendChatMessage(roomId, 'seller', 'bot', `🛡️ **MEDIASI SELESAI:** Admin menyetujui hak Anda. Saldo dipindahkan ke status Siap WD!\n\n💰 **DETAIL SALDO:**\n• Saldo Ditahan: Rp 0\n• Saldo Siap WD: Rp ${room.nominal.toLocaleString('id-ID')}\n\nSilakan klik tombol **WITHDRAW SALDO** di bawah.`);
-    sendChatMessage(roomId, 'admin', 'bot', `Dispute diselesaikan secara manual. Saldo disiapkan untuk ditarik Seller.`);
-  }
-  
-  saveRoomToSupabase(roomId); renderAll();
-}
-
-// --- 5.5 Buyer Refund Operations ---
-function handleBuyerClickRefund(roomId) {
-  const room = STATE.rooms[roomId - 1];
-  room.txState = 'buyer_refund_form';
-  logEvent('action', `Pembeli mengeklik tombol pengajuan rekening Refund.`);
-  saveRoomToSupabase(roomId); renderAll();
-}
-
-function handleBuyerSubmitRefund(roomId, refundInfo) {
-  const room = STATE.rooms[roomId - 1];
-  
-  if (!refundInfo || refundInfo.trim() === '') {
-    sendChatMessage(roomId, 'buyer', 'bot', `⚠️ Mohon isi rekening refund dengan format lengkap!`);
-    saveRoomToSupabase(roomId); renderAll();
-    return;
-  }
-  
-  room.txState = 'refund_receipt_pending';
-  logEvent('action', `Pembeli mengajukan Refund total Rp ${room.buyerTotal.toLocaleString('id-ID')} ke: ${refundInfo}.`);
-  
-  sendChatMessage(roomId, 'buyer', 'bot', `📤 Permintaan refund dikirim!\nStatus: **SEDANG DIVERIFIKASI ADMIN**.`);
-  
-  // Notify Admin
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-  room.chatLogs.admin.push({
-    sender: 'system',
-    text: `💸 **PERMINTAAN REFUND DANA BUYER!**\n🚪 Dari Room: ROOM ${roomId}\n👤 Username: ${room.buyer}\n💰 Jumlah Refund: **Rp ${room.buyerTotal.toLocaleString('id-ID')}** (Tagihan + 5% Fee)\n🏦 Tujuan Transfer: ${refundInfo}\n\nSilakan transfer balik manual ke rekening Buyer, lalu tekan tombol Approve & Kirim Struk Bukti Refund.`,
-    time: timeStr,
-    isRefundApproval: true,
-    refundInfo: refundInfo
-  });
-  
-  renderAll();
-}
-
-function handleAdminApproveRefund(roomId) {
-  const room = STATE.rooms[roomId - 1];
-  
-  // Create simulated refund receipt
-  room.adminUploadedReceipt = `https://dummyimage.com/600x400/ef4444/ffffff.png&text=REFUND+SUKSES+Rp+${room.buyerTotal.toLocaleString('id-ID')}`;
-  room.txState = 'waiting_done_refund';
-  
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-  
-  logEvent('success', `Admin menyetujui Refund. Mentransfer balik Rp ${room.buyerTotal.toLocaleString('id-ID')} ke Pembeli.`);
-  
-  const broadcastText = `💸 **REFUND DANA DIKIRIM OLEH ADMIN!**\n\nDana transfer Pembeli sebesar Rp ${room.buyerTotal.toLocaleString('id-ID')} telah ditransfer balik secara manual ke Pembeli.\n\n📊 **Rincian:**\n• Jumlah Refund: Rp ${room.buyerTotal.toLocaleString('id-ID')}\n• Jam Pengiriman: ${timeStr} WIB\n\nSilakan Pembeli mengeklik tombol DONE di bawah untuk menyelesaikan sesi.`;
-  
-  sendChatMessage(roomId, 'buyer', 'bot', broadcastText);
-  room.chatLogs.buyer.push({ sender: 'bot', text: `Bukti transfer refund dari Admin:`, time: timeStr, attachment: room.adminUploadedReceipt });
-  
-  sendChatMessage(roomId, 'seller', 'bot', `💸 **REFUND DANA BUYER DIKIRIM ADMIN!**\nSesi transaksi dibatalkan secara resmi. Sesi Room ditutup.`);
-  
-  sendChatMessage(roomId, 'admin', 'bot', `✅ Refund disetujui. Bukti transfer balik manual disebarkan.`);
-  
-  saveRoomToSupabase(roomId); renderAll();
-}
-
-// Fast forward simulate the 2-hour Auto-Done timer
-function simulateAutoDone(roomId) {
-  const room = STATE.rooms[roomId - 1];
-  if (room.txState !== 'waiting_delivery_confirmation') {
-    logEvent('warning', `Tombol Simulasi Auto-Done tidak bisa digunakan karena status room bukan 'Menunggu Pengiriman'.`);
-    return;
-  }
-  
-  logEvent('warning', `Simulasi Auto-Done 2 Jam dipicu! Pembeli tidak merespons, transaksi disetujui otomatis.`);
-  
-  handleBuyerAccept(roomId);
-}
-
-// Buyer clicks "Barang Diterima"
-function handleBuyerAccept(roomId) {
-  const room = STATE.rooms[roomId - 1];
-  room.txState = 'waiting_withdraw';
-  
-  logEvent('success', `Pembeli mengonfirmasi barang diterima dengan baik. Saldo Penjual berstatus SIAP WITHDRAW.`);
-  
-  sendChatMessage(roomId, 'buyer', 'bot', `🤝 Terima kasih! Transaksi Anda selesai di sisi Pembeli.\nMenunggu Penjual melakukan pencairan dana.`);
-  
-  sendChatMessage(roomId, 'seller', 'bot', `🎉 **DANA SUDAH DILEPAS PEMBELI!**\n\n💰 **DETAIL SALDO:**\n• Saldo Ditahan: Rp 0\n• Saldo Siap WD: Rp ${room.nominal.toLocaleString('id-ID')}\n\nSilakan klik tombol **WITHDRAW SALDO** di bawah untuk melakukan penarikan ke rekening Anda!`);
-  
-  sendChatMessage(roomId, 'admin', 'bot', `📦 Pembeli menyetujui pelepasan dana. Saldo Penjual siap dicairkan.`);
-  
-  saveRoomToSupabase(roomId); renderAll();
-}
-
-// Seller clicks Withdraw Saldo, opens form input
-function handleSellerClickWithdraw(roomId) {
-  const room = STATE.rooms[roomId - 1];
-  room.txState = 'withdraw_submitted';
-  
-  logEvent('action', `Penjual menekan tombol Withdraw. Menampilkan formulir rekening.`);
-  
-  sendChatMessage(roomId, 'seller', 'bot', `💸 **PENGAJUAN WITHDRAWAL**\nAnda akan menarik seluruh saldo Anda dari Room ${roomId}.\n\n📊 **SUMMARY WITHDRAW (POTONGAN 2.5%):**\n• Total Saldo Utama : Rp ${room.nominal.toLocaleString('id-ID')}\n• Potongan WD (2.5%) : Rp ${(room.nominal * 0.025).toLocaleString('id-ID')}\n--------------------------------------\n💰 **BERSIH DITERIMA : Rp ${room.sellerTotal.toLocaleString('id-ID')}**\n\nSilakan isi detail rekening Anda pada panel input di bawah!`);
-  
-  saveRoomToSupabase(roomId); renderAll();
-}
-
-// Seller submits withdrawal details
-function handleSellerSubmitWd(roomId, bankInfo) {
-  const room = STATE.rooms[roomId - 1];
-  
-  if (!bankInfo || bankInfo.trim() === '') {
-    sendChatMessage(roomId, 'seller', 'bot', `⚠️ Mohon isi rekening tujuan dengan format lengkap!`);
-    saveRoomToSupabase(roomId); renderAll();
-    return;
-  }
-  
-  const parts = bankInfo.split('-').map(p => p.trim());
-  room.wdDetails.accountNo = parts[0] || 'Tidak diketahui';
-  room.wdDetails.bankName = parts[1] || 'DANA';
-  room.wdDetails.ownerName = parts[2] || 'Syahrul Gunawan';
-  
-  room.txState = 'withdraw_receipt_pending';
-  
-  logEvent('action', `Penjual mengajukan pencairan bersih Rp ${room.sellerTotal.toLocaleString('id-ID')} ke: ${bankInfo}.`);
-  
-  sendChatMessage(roomId, 'seller', 'bot', `📤 Permintaan penarikan dikirim!\nStatus: **SEDANG DIVERIFIKASI ADMIN**.\n\nMohon bersabar, Admin sedang mentransfer manual dana ke rekening Anda.`);
-  
-  // Notify Admin phone
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-  room.chatLogs.admin.push({
-    sender: 'system',
-    text: `💸 **PERMINTAAN TRANSFER DANA SELLER!**\n🚪 Dari Room: ROOM ${roomId}\n👤 Username: ${room.seller}\n💰 Jumlah Bersih: **Rp ${room.sellerTotal.toLocaleString('id-ID')}**\n🏦 Tujuan Transfer: ${room.wdDetails.accountNo} - ${room.wdDetails.bankName} (${room.wdDetails.ownerName})\n\nSilakan transfer secara manual ke rekening Seller, lalu tekan tombol Approve & Kirim Struk Bukti Transfer.`,
-    time: timeStr,
-    isWdApproval: true
-  });
-  
-  renderAll();
-}
-
-// Admin sends reminder to buyer (optional feature)
-function handleAdminSendReminder(roomId) {
-  const room = STATE.rooms[roomId - 1];
-  logEvent('info', `Admin mengirimkan reminder opsional ke Pembeli di ROOM ${roomId}.`);
-  
-  sendChatMessage(roomId, 'buyer', 'bot', `🔔 **REMINDER ADMIN:** Halo Pembeli, saat ini kami sedang memproses pencairan dana transaksi ke rekening Penjual. Terima kasih telah tertib bertransaksi!`);
-  
-  sendChatMessage(roomId, 'admin', 'bot', `🔔 Reminder dikirim ke Pembeli.`);
-  renderAll();
-}
-
-// Admin approves WD & uploads proof receipt
-function handleAdminApproveWd(roomId) {
-  const room = STATE.rooms[roomId - 1];
-  
-  // Simulator automatically builds an admin receipt image
-  room.adminUploadedReceipt = `https://dummyimage.com/600x400/06b6d4/ffffff.png&text=TRANSFER+SUKSES+Rp+${room.sellerTotal.toLocaleString('id-ID')}`;
-  room.txState = 'waiting_done';
-  
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-  
-  logEvent('success', `Admin memproses transfer WD manual senilai Rp ${room.sellerTotal.toLocaleString('id-ID')} ke Seller.`);
-  
-  // broadcast notice to buyer & seller
-  const broadcastText = `💸 **DANA DIKIRIM OLEH ADMIN!**\n\nDana bersih transaksi telah ditransfer manual ke Penjual.\n\n📊 **Rincian:**\n• Jumlah Bersih: Rp ${room.sellerTotal.toLocaleString('id-ID')}\n• Jam Pengiriman: ${timeStr} WIB\n\nSilakan Penjual mengonfirmasi penerimaan jika saldo sudah masuk mutasi bank.`;
-  
-  sendChatMessage(roomId, 'buyer', 'bot', broadcastText);
-  // Inject receipt inside buyer chat
-  room.chatLogs.buyer.push({ sender: 'bot', text: `Bukti transfer sukses dari Admin:`, time: timeStr, attachment: room.adminUploadedReceipt });
-  
-  sendChatMessage(roomId, 'seller', 'bot', broadcastText);
-  // Inject receipt inside seller chat
-  room.chatLogs.seller.push({ sender: 'bot', text: `Bukti transfer sukses dari Admin:`, time: timeStr, attachment: room.adminUploadedReceipt });
-  
-  // Update admin chat
-  sendChatMessage(roomId, 'admin', 'bot', `✅ Pengajuan WD disetujui. Bukti transfer manual disebarkan.`);
-  
-  saveRoomToSupabase(roomId); renderAll();
-}
-
-// Seller confirms receipt of funds
-function handleSellerConfirmFunds(roomId) {
-  const room = STATE.rooms[roomId - 1];
-  room.sellerDone = true;
-  
-  logEvent('action', `Penjual menyatakan dana WD telah mendarat di rekeningnya.`);
-  
-  sendChatMessage(roomId, 'seller', 'bot', `👍 Anda mengonfirmasi penerimaan dana. Terima kasih!\nSilakan klik tombol **DONE** untuk menuntaskan sesi.`);
-  sendChatMessage(roomId, 'buyer', 'bot', `ℹ️ Penjual menyatakan telah menerima dana.`);
-  
-  saveRoomToSupabase(roomId); renderAll();
-}
-
-// Buyer or Seller clicks DONE finalization
-function handleDoneClick(roomId, role) {
-  const room = STATE.rooms[roomId - 1];
-  
-  if (role === 'buyer') room.buyerDone = true;
-  if (role === 'seller') room.sellerDone = true;
-  
-  logEvent('action', `${role === 'buyer' ? 'Pembeli' : 'Penjual'} mengeklik tombol DONE.`);
-  
-  // If both are done, finalize the trade
-  if (room.buyerDone && room.sellerDone) {
-    finalizeTransaction(roomId);
-  } else {
-    sendChatMessage(roomId, role, 'bot', `Menunggu pihak satunya mengeklik **DONE** untuk menutup room.`);
-    saveRoomToSupabase(roomId); renderAll();
-  }
-}
-
-// Finalize trade: Save to History, update Metrics and wipe room clean
-function finalizeTransaction(roomId, isRefund = false) {
-  const room = STATE.rooms[roomId - 1];
-  
-  const txId = 'TX-' + Math.floor(10000 + Math.random() * 90000);
-  const now = new Date();
-  const dateStr = now.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) + ' | ' + now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
-  
-  // Blur usernames for privacy display
-  const anonymize = (user) => {
-    if (!user) return '***';
-    const clean = user.replace('@', '');
-    if (clean.length <= 4) return '@' + clean[0] + '***';
-    return '@' + clean.slice(0, 3) + '*******' + clean.slice(-2);
-  };
-  
-  // Create history entry
-  const newTx = {
-    txId: txId,
-    room: `ROOM ${roomId}`,
-    date: dateStr,
-    buyer: anonymize(room.buyer),
-    seller: anonymize(room.seller),
-    nominal: room.nominal,
-    status: isRefund ? '🔴 REFUNDED CANCEL' : '🟢 SUCCESS DONE'
-  };
-  
-  // Mutate stats
-  STATE.history.unshift(newTx);
-  saveTxHistoryToSupabase(txId, roomId, room.buyer, room.seller, room.nominal, isRefund ? '🔴 REFUNDED CANCEL' : '🟢 SUCCESS DONE');
-  if (!isRefund) {
-    STATE.totalVolume += room.nominal;
-  }
-  STATE.totalTransactions += 1;
-  
-  if (isRefund) {
-    logEvent('success', `🎉 REFUND TRANSAKSI SELESAI SEPENUHNYA! ID: ${txId}. Nominal Refund: Rp ${room.buyerTotal.toLocaleString('id-ID')}. Sesi ROOM ${roomId} ditutup.`);
-  } else {
-    logEvent('success', `🎉 TRANSAKSI SELESAI SEPENUHNYA! ID: ${txId}. Nominal: Rp ${room.nominal.toLocaleString('id-ID')}. Sesi ROOM ${roomId} ditutup.`);
-  }
-  
-  // Reset room variables clean
-  room.buyer = null;
-  room.seller = null;
-  room.adminJoined = false;
-  room.status = 'empty';
-  room.txState = 'select_role';
-  room.nominal = 0;
-  room.buyerTotal = 0;
-  room.sellerTotal = 0;
-  room.buyerUploadedReceipt = null;
-  room.adminUploadedReceipt = null;
-  room.wdDetails = { accountNo: '', bankName: '', ownerName: '' };
-  room.buyerDone = false;
-  room.sellerDone = false;
-  
-  room.chatLogs.buyer = [
-    { sender: 'bot', text: '🛡️ **REKBER BANG DIGITAL** 🛡️\nHalo! Selamat datang di sistem Rekber Otomatis.\n\nSilakan tentukan role transaksi Anda di bawah ini.', time: '02:05' }
-  ];
-  room.chatLogs.seller = [
-    { sender: 'bot', text: '🛡️ **REKBER BANG DIGITAL** 🛡️\nHalo! Selamat datang di sistem Rekber Otomatis.\n\nSilakan tentukan role transaksi Anda di bawah ini.', time: '02:05' }
-  ];
-  room.chatLogs.admin = [
-    { sender: 'system', text: 'Menunggu panggilan bantuan aktif dari room transaksi...', time: '02:05' }
-  ];
-  
-  renderAll();
-}
-
-// --- 6. DOM RENDERERS ---
-
-function renderAll() {
-  renderMetrics();
+  // Load rooms
+  State.rooms = await fetchRooms();
   renderRooms();
-  renderHistory();
-  
-  // Render active phones
-  renderPhone('buyer');
-  renderPhone('seller');
-  renderPhone('admin');
-}
-
-function renderMetrics() {
-  document.getElementById('stat-total-volume').innerText = 'Rp ' + STATE.totalVolume.toLocaleString('id-ID');
-  document.getElementById('stat-total-tx').innerText = STATE.totalTransactions.toLocaleString('id-ID') + ' Transaksi';
 }
 
 function renderRooms() {
-  const container = document.getElementById('room-list-container');
-  if (!container) return;
-  
-  container.innerHTML = '';
-  
-  STATE.rooms.forEach((room, index) => {
-    const item = document.createElement('div');
-    item.className = `room-status-item ${index === STATE.activeRoomIndex ? 'active-room-highlight' : ''}`;
-    // Add clickable styling
-    item.style.cursor = 'pointer';
-    if (index === STATE.activeRoomIndex) {
-      item.style.borderColor = 'var(--accent-cyan)';
-      item.style.background = 'rgba(6, 182, 212, 0.04)';
-    }
-    
-    // Set status badge details
-    let badgeClass = 'empty';
-    let badgeText = '⚪ KOSONG (0/2)';
-    let usersText = '(Kosong)';
-    
-    if (room.status === 'half') {
-      badgeClass = 'half';
-      badgeText = '🟢 ONLINE (1/2)';
-      usersText = room.buyer ? `${room.buyer} (BUYER)` : `${room.seller} (SELLER)`;
-    } else if (room.status === 'locked') {
-      badgeClass = 'locked';
-      badgeText = '🔴 LOCKED (2/2)';
-      usersText = 'Pembeli & Penjual';
-    }
-    
-    item.innerHTML = `
-      <div class="room-label">
-        🚪 Room ${room.id} 
-        <span class="room-badge ${badgeClass}">${badgeText}</span>
-      </div>
-      <div class="room-users" title="${usersText}">${usersText}</div>
-    `;
-    
-    // Let user tap room in statistics to focus simulator on it
-    item.addEventListener('click', () => {
-      STATE.activeRoomIndex = index;
-      logEvent('info', `Fokus simulator beralih ke Room ${room.id}.`);
-      renderAll();
-    });
-    
-    container.appendChild(item);
-  });
-}
-
-function renderHistory(searchQuery = '') {
-  const container = document.getElementById('history-list-container');
-  if (!container) return;
-  
-  container.innerHTML = '';
-  
-  const query = searchQuery.toLowerCase();
-  
-  const filtered = STATE.history.filter(tx => {
-    return tx.txId.toLowerCase().includes(query) || 
-           tx.room.toLowerCase().includes(query) ||
-           tx.buyer.toLowerCase().includes(query) ||
-           tx.seller.toLowerCase().includes(query);
-  });
-  
-  if (filtered.length === 0) {
-    container.innerHTML = `<div style="text-align:center; font-size:0.75rem; color:var(--text-muted); padding:1rem;">Tidak ada history ditemukan.</div>`;
+  const list = document.getElementById('rooms-list');
+  if (!State.rooms.length) {
+    list.innerHTML = '<div class="empty-state"><div class="empty-icon">🚪</div><div class="empty-title">Tidak ada room tersedia</div></div>';
     return;
   }
-  
-  filtered.forEach(tx => {
-    const el = document.createElement('div');
-    el.className = 'history-item';
-    
-    el.innerHTML = `
-      <div class="history-top-row">
-        <span class="history-tx-id"><i class="fa-solid fa-receipt"></i> ${tx.txId}</span>
-        <span class="history-room">${tx.room}</span>
-      </div>
-      <div class="history-date">${tx.date}</div>
-      <div class="history-user-info">
-        <div class="history-user">
-          <span class="history-role">Pembeli:</span>
-          <span>${tx.buyer}</span>
+
+  list.innerHTML = State.rooms.map(room => {
+    const isMine = room.buyer === ME.username || room.seller === ME.username || (ME.isAdmin && room.status !== 'empty');
+    const isEmpty   = room.status === 'empty';
+    const isHalf    = room.status === 'half';
+    const isLocked  = room.status === 'locked';
+    const isMyRoom  = isMine;
+
+    let icon = isEmpty ? '🔓' : isHalf ? '⏳' : '🔒';
+    let iconClass = isEmpty ? 'empty' : isHalf ? 'half' : 'locked';
+    let badgeClass = isEmpty ? 'badge-empty' : isHalf ? 'badge-half' : 'badge-locked';
+    let badgeText  = isEmpty ? 'KOSONG' : isHalf ? '1/2 ONLINE' : '2/2 LOCKED';
+    let subtitle = '';
+
+    if (isEmpty)  subtitle = 'Siap digunakan — klik untuk bergabung';
+    if (isHalf)   subtitle = isMyRoom ? '✅ Room Anda (menunggu lawan)' : 'Menunggu 1 peserta lagi';
+    if (isLocked) subtitle = isMyRoom ? `✅ Room Anda • ${room.tx_state?.replace(/_/g,' ')}` : 'Transaksi sedang berlangsung';
+
+    if (isMyRoom) { badgeClass = 'badge-active'; badgeText = 'ROOM SAYA'; }
+
+    const canClick = isEmpty || isMyRoom || (isHalf && !isLocked);
+    const lockedClass = (!canClick && !ME.isAdmin) ? 'locked' : '';
+
+    return `
+      <div class="room-card ${lockedClass} ${isMyRoom ? 'slide-up' : ''}" onclick="App.openRoom(${room.id})">
+        <div class="room-icon ${iconClass}">${icon}</div>
+        <div class="room-info">
+          <div class="room-name">Room ${room.id}</div>
+          <div class="room-status-text">${subtitle}</div>
         </div>
-        <div class="history-user">
-          <span class="history-role">Penjual:</span>
-          <span>${tx.seller}</span>
-        </div>
-      </div>
-      <div class="history-bottom-row">
-        <span class="history-status"><i class="fa-solid fa-circle-check"></i> SUCCESS DONE</span>
-        <span class="history-nominal">Rp ${tx.nominal.toLocaleString('id-ID')}</span>
-      </div>
-    `;
-    
-    container.appendChild(el);
-  });
+        <span class="room-badge ${badgeClass}">${badgeText}</span>
+      </div>`;
+  }).join('');
 }
 
-// Helper to convert markdown bold ** to <strong> tags in chat rendering
-function formatMarkdown(text) {
-  if (!text) return '';
-  return text
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/\n/g, '<br>');
+// ─── RENDER: ROOM VIEW ───────────────────────────────────────
+const TX_STEPS = [
+  { key: 'join',     label: 'Join' },
+  { key: 'topup',    label: 'Top-Up' },
+  { key: 'delivery', label: 'Kirim' },
+  { key: 'confirm',  label: 'Terima' },
+  { key: 'withdraw', label: 'WD' },
+  { key: 'done',     label: 'Done' },
+];
+
+function txStateToStep(txState) {
+  const map = {
+    'select_role': 0, 'waiting_member': 0,
+    'waiting_admin_panggilan': 1,
+    'topup_menu': 1, 'topup_receipt_pending': 1, 'verifying_topup': 1,
+    'waiting_delivery': 2,
+    'waiting_delivery_confirmation': 3,
+    'disputed': 3,
+    'waiting_withdraw': 4, 'withdraw_submitted': 4, 'withdraw_receipt_pending': 4,
+    'waiting_done': 5, 'waiting_done_refund': 5,
+    'buyer_refund_menu': 4, 'refund_receipt_pending': 4,
+  };
+  return map[txState] ?? 0;
 }
 
-// Render dynamic elements inside mobile phone chat logs
-function renderPhone(role) {
-  const roomIndex = STATE.activeRoomIndex;
-  const room = STATE.rooms[roomIndex];
-  
-  const chatBody = document.getElementById(`${role}-chat-body`);
-  const actionArea = document.getElementById(`${role}-action-area`);
-  
-  if (!chatBody) return;
-  
-  // 1. Render Chat message logs
-  chatBody.innerHTML = '';
-  const messages = room.chatLogs[role] || [];
-  
-  messages.forEach(msg => {
-    const bubble = document.createElement('div');
-    
-    if (msg.sender === 'user') {
-      bubble.className = 'message-bubble out';
-      bubble.innerHTML = `
-        <div>${formatMarkdown(msg.text)}</div>
-        <span class="message-time">${msg.time}</span>
-      `;
+async function renderRoomView(room) {
+  // Header
+  document.getElementById('room-view-title').textContent = `Room ${room.id}`;
+
+  // Role tag
+  const roleTag = document.getElementById('room-view-role-tag');
+  const roleMap = { buyer: { text: '👤 PEMBELI', cls: 'badge-active' }, seller: { text: '🏪 PENJUAL', cls: 'badge-success' }, admin: { text: '👑 ADMIN', cls: 'badge-admin' } };
+  const roleInfo = roleMap[State.myRole] || { text: '—', cls: 'badge-empty' };
+  roleTag.textContent = roleInfo.text;
+  roleTag.className = `room-role-tag room-badge ${roleInfo.cls}`;
+
+  // Status badge
+  const statusBadge = document.getElementById('room-view-status-badge');
+  const statusMap = { empty: ['KOSONG', 'badge-empty'], half: ['1/2 ONLINE', 'badge-half'], locked: ['2/2 LOCKED', 'badge-locked'] };
+  const [sTxt, sCls] = statusMap[room.status] || ['—', 'badge-empty'];
+  statusBadge.textContent = sTxt;
+  statusBadge.className = `room-badge ${sCls}`;
+
+  // Progress steps
+  const currentStep = txStateToStep(room.tx_state);
+  document.getElementById('tx-progress-bar').innerHTML = `
+    <div class="tx-progress-label">Progress Transaksi</div>
+    <div class="progress-steps">
+      ${TX_STEPS.map((s, i) => `
+        <div class="progress-step ${i < currentStep ? 'done' : i === currentStep ? 'active' : ''}">
+          <div class="step-dot">${i < currentStep ? '✓' : i + 1}</div>
+          <div class="step-dot-label">${s.label}</div>
+        </div>`).join('')}
+    </div>`;
+
+  // Participants
+  document.getElementById('participants-row').innerHTML = `
+    <div class="participant-chip">
+      <div class="participant-dot ${room.buyer ? 'buyer' : 'empty'}">${room.buyer ? fmt.initials(room.buyer) : '?'}</div>
+      <span class="participant-name">${room.buyer || 'Menunggu Pembeli...'}</span>
+    </div>
+    <span class="vs-divider">vs</span>
+    <div class="participant-chip">
+      <div class="participant-dot ${room.seller ? 'seller' : 'empty'}">${room.seller ? fmt.initials(room.seller) : '?'}</div>
+      <span class="participant-name">${room.seller || 'Menunggu Penjual...'}</span>
+    </div>
+    ${room.admin_joined ? `
+    <div style="margin-left:4px;">
+      <div class="participant-chip" style="flex:none;">
+        <div class="participant-dot admin">👑</div>
+        <span class="participant-name">Admin</span>
+      </div>
+    </div>` : ''}`;
+
+  // Nominal summary
+  const nomSection = document.getElementById('nominal-section');
+  if (room.nominal > 0) {
+    nomSection.style.display = '';
+    document.getElementById('nom-base').textContent  = fmt.currency(room.nominal);
+    document.getElementById('nom-fee').textContent   = fmt.currency(room.buyer_total - room.nominal);
+    document.getElementById('nom-total').textContent = fmt.currency(room.buyer_total);
+    const sellerRow = document.getElementById('seller-net-row');
+    if (room.seller_total > 0) {
+      sellerRow.style.display = '';
+      document.getElementById('nom-seller-net').textContent = fmt.currency(room.seller_total);
+    }
+  } else {
+    nomSection.style.display = 'none';
+  }
+
+  // State-specific UI
+  await renderStateSection(room);
+}
+
+async function renderStateSection(room) {
+  const section = document.getElementById('tx-state-section');
+  const actions = document.getElementById('action-panel');
+  const r = State.myRole;
+  const state = room.tx_state;
+
+  let stateHTML = '';
+  let actionsHTML = '';
+
+  // ── STATE: waiting_member ──────────────────────────
+  if (state === 'waiting_member' || state === 'select_role') {
+    stateHTML = mkStateCard('waiting', '⏳', 'Menunggu Peserta Lain',
+      `${r === 'buyer' ? 'Pembeli' : 'Penjual'} sudah masuk. Menunggu ${r === 'buyer' ? 'penjual' : 'pembeli'} bergabung ke room ini...`);
+    actionsHTML = `<button class="btn btn-ghost" onclick="App.leaveRoom()"><i class="fa-solid fa-arrow-right-from-bracket"></i> Keluar dari Room</button>`;
+  }
+
+  // ── STATE: waiting_admin_panggilan ─────────────────
+  else if (state === 'waiting_admin_panggilan') {
+    if (r === 'admin') {
+      stateHTML = mkStateCard('admin', '👑', 'Ada Panggilan Admin!',
+        `Room ${room.id}: ${room.buyer} & ${room.seller} membutuhkan mediator. Klik Join untuk masuk.`);
+      actionsHTML = `
+        <button class="btn btn-admin" onclick="AdminActions.joinRoom(${room.id})"><i class="fa-solid fa-shield-halved"></i> Accept & Bergabung sebagai Admin</button>
+        <button class="btn btn-ghost" onclick="App.leaveRoom()"><i class="fa-solid fa-xmark"></i> Tolak</button>`;
     } else {
-      bubble.className = 'message-bubble in';
-      
-      let attachmentHtml = '';
-      if (msg.attachment) {
-        attachmentHtml = `<img src="${msg.attachment}" class="upload-dummy-img" alt="bukti transfer">`;
+      const alreadyCalled = room.admin_joined;
+      stateHTML = mkStateCard(alreadyCalled ? 'active' : 'waiting',
+        alreadyCalled ? '✅' : '📞',
+        alreadyCalled ? 'Admin Sudah Bergabung!' : 'Siap Bertransaksi?',
+        alreadyCalled ? 'Admin telah masuk sebagai mediator. Menunggu pembeli input nominal...' : 'Kedua pihak sudah masuk. Panggil admin sebagai mediator transaksi.');
+      if (!alreadyCalled) {
+        actionsHTML = `
+          <div class="alert warning" style="margin:0;">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            <div class="alert-text">Pastikan Anda telah <strong>berdiskusi & sepakat</strong> mengenai harga dan item sebelum memanggil admin.</div>
+          </div>
+          <button class="btn btn-primary" onclick="BuyerActions.callAdmin(${room.id})"><i class="fa-solid fa-phone"></i> Panggil Admin</button>
+          <button class="btn btn-ghost" onclick="App.leaveRoom()"><i class="fa-solid fa-arrow-right-from-bracket"></i> Keluar dari Room</button>`;
       }
-      
-      bubble.innerHTML = `
-        <div>${formatMarkdown(msg.text)}</div>
-        ${attachmentHtml}
-        <span class="message-time">${msg.time}</span>
-      `;
     }
-    
-    chatBody.appendChild(bubble);
+  }
+
+  // ── STATE: topup_menu ─────────────────────────────
+  else if (state === 'topup_menu') {
+    if (r === 'buyer') {
+      stateHTML = mkStateCard('active', '💰', 'Input Nominal Transaksi',
+        'Masukkan harga produk yang disepakati. Sistem akan otomatis menghitung total yang harus Anda transfer.');
+      actionsHTML = `
+        <div style="padding:0 16px;">
+          <div class="form-group">
+            <label class="form-label">Harga Produk (Rp)</label>
+            <div class="input-with-prefix">
+              <span class="input-prefix">Rp</span>
+              <input type="number" id="input-nominal" placeholder="Contoh: 500000" min="10000" inputmode="numeric">
+            </div>
+            <div class="form-hint" id="fee-preview">Masukkan nominal untuk lihat rincian biaya</div>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-ghost" onclick="App.leaveRoom()"><i class="fa-solid fa-xmark"></i> Batal</button>
+          <button class="btn btn-primary" onclick="BuyerActions.submitNominal(${room.id})"><i class="fa-solid fa-calculator"></i> Konfirmasi</button>
+        </div>`;
+      // Attach live preview listener after render
+      setTimeout(() => {
+        const inp = document.getElementById('input-nominal');
+        if (inp) inp.addEventListener('input', () => {
+          const n = parseFloat(inp.value) || 0;
+          const fee = n * CONFIG.FEE_BUYER;
+          const total = n + fee;
+          document.getElementById('fee-preview').textContent = n > 0
+            ? `Fee Rekber 5%: ${fmt.currency(fee)} → Total Transfer: ${fmt.currency(total)}`
+            : 'Masukkan nominal untuk lihat rincian biaya';
+        });
+      }, 50);
+    } else if (r === 'seller') {
+      stateHTML = mkStateCard('waiting', '⏳', 'Menunggu Pembeli Input Nominal',
+        'Admin sudah bergabung. Menunggu pembeli memasukkan harga produk yang disepakati...');
+      actionsHTML = '';
+    } else {
+      stateHTML = mkStateCard('admin', '👑', 'Admin — Menunggu Input Pembeli',
+        `Admin sudah join. Menunggu ${room.buyer} input nominal transaksi.`);
+    }
+  }
+
+  // ── STATE: topup_receipt_pending ──────────────────
+  else if (state === 'topup_receipt_pending') {
+    const adminAcc = CONFIG.ADMIN_ACCOUNT;
+    if (r === 'buyer') {
+      stateHTML = mkStateCard('active', '💳', 'Transfer Dana ke Admin',
+        `Silakan transfer sejumlah ${fmt.currency(room.buyer_total)} ke rekening admin di bawah ini, lalu upload bukti transfer.`);
+      actionsHTML = `
+        <div class="info-box" style="margin:0 16px 12px;">
+          <div class="info-box-header"><i class="fa-solid fa-building-columns"></i><span class="info-box-title">Rekening Tujuan</span></div>
+          <div class="info-row">
+            <span class="info-key">Metode</span>
+            <span class="info-val"><strong>${adminAcc.method}</strong></span>
+          </div>
+          <div class="info-row">
+            <span class="info-key">Nomor</span>
+            <span class="info-val monospace">${adminAcc.number} <button class="copy-btn" onclick="copyText('${adminAcc.number}','Nomor')"><i class="fa-regular fa-copy"></i></button></span>
+          </div>
+          <div class="info-row">
+            <span class="info-key">Atas Nama</span>
+            <span class="info-val">${adminAcc.name}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-key" style="color:var(--red-400);font-weight:700;">Total Transfer</span>
+            <span class="info-val green" style="font-size:15px;">${fmt.currency(room.buyer_total)} <button class="copy-btn" onclick="copyText('${room.buyer_total}','Nominal')"><i class="fa-regular fa-copy"></i></button></span>
+          </div>
+        </div>
+        <div style="padding:0 16px;">
+          <label class="form-label">Upload Bukti Transfer</label>
+          <div class="upload-area" id="upload-area-buyer">
+            <input type="file" accept="image/*" id="upload-input-buyer" onchange="BuyerActions.previewReceipt(this)">
+            <div class="upload-icon">📸</div>
+            <div class="upload-text">Ketuk untuk pilih foto bukti transfer</div>
+            <div class="upload-hint">Format: JPG, PNG, WEBP</div>
+          </div>
+          <div id="receipt-preview-buyer"></div>
+        </div>
+        <div class="btn-row" style="margin-top:8px;">
+          <button class="btn btn-primary" id="btn-kirim-bukti" onclick="BuyerActions.submitReceipt(${room.id})" disabled><i class="fa-solid fa-paper-plane"></i> Kirim Bukti Transfer</button>
+        </div>`;
+    } else if (r === 'seller') {
+      stateHTML = mkStateCard('waiting', '🛡️', 'Menunggu Pembeli Transfer',
+        `Pembeli sedang memproses transfer ${fmt.currency(room.buyer_total)} ke admin. Tunggu konfirmasi admin.`);
+    } else {
+      stateHTML = mkStateCard('admin', '👑', 'Menunggu Bukti Transfer Pembeli',
+        `Pembeli harus transfer ${fmt.currency(room.buyer_total)} lalu upload bukti.`);
+    }
+  }
+
+  // ── STATE: verifying_topup ───────────────────────
+  else if (state === 'verifying_topup') {
+    if (r === 'admin') {
+      stateHTML = mkStateCard('admin', '🔍', 'Verifikasi Pembayaran Pembeli',
+        `${room.buyer} sudah upload bukti transfer ${fmt.currency(room.buyer_total)}. Periksa mutasi rekening Anda dan verifikasi.`);
+      actionsHTML = `
+        <div style="padding:0 16px 12px;" id="admin-receipt-view">
+          <div class="form-label">Bukti Transfer Pembeli</div>
+          ${room.buyer_uploaded_receipt
+            ? `<div class="upload-preview"><img src="${room.buyer_uploaded_receipt}" alt="Bukti Transfer"><span class="upload-preview-badge">Terunggah</span></div>`
+            : '<div class="alert info"><i class="fa-solid fa-image"></i><span class="alert-text">Gambar sedang diproses...</span></div>'}
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-danger" onclick="AdminActions.rejectPayment(${room.id})"><i class="fa-solid fa-xmark"></i> Tolak</button>
+          <button class="btn btn-success" onclick="AdminActions.approvePayment(${room.id})"><i class="fa-solid fa-check"></i> Verifikasi & Tahan Dana</button>
+        </div>`;
+    } else {
+      const whoWaits = r === 'buyer' ? 'Bukti transfer Anda sedang diperiksa oleh admin.' : 'Menunggu admin memverifikasi pembayaran pembeli.';
+      stateHTML = mkStateCard('waiting', '🔍', 'Verifikasi oleh Admin', whoWaits);
+    }
+  }
+
+  // ── STATE: waiting_delivery ──────────────────────
+  else if (state === 'waiting_delivery') {
+    if (r === 'seller') {
+      stateHTML = mkStateCard('success', '🛡️', 'Dana Aman Ditahan Admin!',
+        `${fmt.currency(room.nominal)} telah diamankan oleh admin. Silakan kirimkan produk/jasa Anda ke pembeli sekarang.`);
+      actionsHTML = `
+        <div class="alert info" style="margin:0 16px 12px;">
+          <i class="fa-solid fa-circle-info"></i>
+          <div class="alert-text">Kirim produk ke <strong>${room.buyer}</strong> melalui chat Telegram. Setelah selesai, klik tombol di bawah.</div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-success" onclick="SellerActions.confirmSent(${room.id})"><i class="fa-solid fa-truck-fast"></i> Produk Sudah Dikirim</button>
+        </div>`;
+    } else if (r === 'buyer') {
+      stateHTML = mkStateCard('success', '🛡️', 'Dana Aman! Menunggu Penjual',
+        `Admin menahan ${fmt.currency(room.nominal)} sebagai jaminan. Penjual sedang mempersiapkan produk Anda.`);
+    } else {
+      stateHTML = mkStateCard('admin', '🛡️', 'Dana Ditahan — Menunggu Pengiriman',
+        `${fmt.currency(room.nominal)} ditahan. Menunggu ${room.seller} konfirmasi pengiriman.`);
+    }
+  }
+
+  // ── STATE: waiting_delivery_confirmation ─────────
+  else if (state === 'waiting_delivery_confirmation') {
+    if (r === 'buyer') {
+      stateHTML = mkStateCard('active', '📦', 'Periksa Produk Anda!',
+        `Penjual telah mengirimkan produk. Periksa dengan seksama sebelum mengkonfirmasi. Jika ada masalah, gunakan tombol Dispute.`);
+      actionsHTML = `
+        <div class="alert warning" style="margin:0 16px 12px;">
+          <i class="fa-solid fa-clock"></i>
+          <div class="alert-text">Jika tidak ada konfirmasi dalam <strong>2 jam</strong>, dana akan otomatis dilepas ke penjual.</div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-danger" style="flex:0.8;" onclick="BuyerActions.raiseDispute(${room.id})"><i class="fa-solid fa-flag"></i> Dispute</button>
+          <button class="btn btn-success" onclick="BuyerActions.confirmReceived(${room.id})"><i class="fa-solid fa-circle-check"></i> Produk Diterima ✓</button>
+        </div>`;
+    } else if (r === 'seller') {
+      stateHTML = mkStateCard('waiting', '⏳', 'Menunggu Konfirmasi Pembeli',
+        'Produk sudah terkirim. Menunggu pembeli mengkonfirmasi penerimaan. Auto-done aktif dalam 2 jam.');
+    } else {
+      stateHTML = mkStateCard('admin', '👀', 'Monitor Konfirmasi Penerimaan',
+        `${room.buyer} sedang memeriksa produk dari ${room.seller}.`);
+    }
+  }
+
+  // ── STATE: disputed ──────────────────────────────
+  else if (state === 'disputed') {
+    if (r === 'admin') {
+      stateHTML = mkStateCard('danger', '⚖️', 'DISPUTE — Butuh Mediasi Admin',
+        `${room.buyer} mengajukan komplain. Dana dibekukan. Review situasi dan putuskan resolusinya.`);
+      actionsHTML = `
+        <div class="alert danger" style="margin:0 16px 12px;">
+          <i class="fa-solid fa-lock"></i>
+          <div class="alert-text"><strong>Dana dibekukan.</strong> Hanya admin yang dapat membuka segel dan memutuskan resolusi.</div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-danger" onclick="AdminActions.resolveRefund(${room.id})"><i class="fa-solid fa-rotate-left"></i> Refund ke Pembeli</button>
+          <button class="btn btn-success" onclick="AdminActions.resolveRelease(${room.id})"><i class="fa-solid fa-money-bill-transfer"></i> Lepas ke Penjual</button>
+        </div>`;
+    } else {
+      stateHTML = mkStateCard('danger', '⚖️', 'DISPUTE AKTIF — Dana Dibekukan',
+        `Dispute sedang diproses admin. Harap tunggu keputusan mediator. Jangan keluar dari room.`);
+    }
+  }
+
+  // ── STATE: waiting_withdraw ──────────────────────
+  else if (state === 'waiting_withdraw') {
+    if (r === 'seller') {
+      stateHTML = mkStateCard('success', '💸', 'Pembeli Sudah Konfirmasi!',
+        `Selamat! Pembeli puas. Ajukan withdraw dan masukkan data rekening untuk pencairan ${fmt.currency(room.seller_total)}.`);
+      actionsHTML = `
+        <div style="padding:0 16px;">
+          <div class="form-group">
+            <label class="form-label">Metode Pencairan</label>
+            <select class="form-select" id="wd-method">
+              <option value="DANA">DANA</option>
+              <option value="GoPay">GoPay</option>
+              <option value="OVO">OVO</option>
+              <option value="ShopeePay">ShopeePay</option>
+              <option value="BCA">BCA</option>
+              <option value="BRI">BRI</option>
+              <option value="BNI">BNI</option>
+              <option value="Mandiri">Mandiri</option>
+              <option value="BSI">BSI</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Nomor Rekening / No. HP</label>
+            <input class="form-input" id="wd-account" type="text" placeholder="Contoh: 08123456789" inputmode="numeric">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Nama Pemilik Rekening</label>
+            <input class="form-input" id="wd-name" type="text" placeholder="Sesuai nama di rekening">
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-success" onclick="SellerActions.submitWithdraw(${room.id})"><i class="fa-solid fa-money-bill-transfer"></i> Ajukan Withdraw ${fmt.currency(room.seller_total)}</button>
+        </div>`;
+    } else if (r === 'buyer') {
+      stateHTML = mkStateCard('success', '✅', 'Terima Kasih!',
+        'Konfirmasi penerimaan Anda sudah diproses. Dana sedang dicairkan ke penjual.');
+    } else {
+      stateHTML = mkStateCard('admin', '💸', 'Menunggu Penjual Ajukan Withdraw',
+        `${room.seller} belum mengisi data rekening. Total akan dicairkan: ${fmt.currency(room.seller_total)}`);
+    }
+  }
+
+  // ── STATE: withdraw_receipt_pending ──────────────
+  else if (state === 'withdraw_receipt_pending') {
+    let wdAcc = {};
+    try { wdAcc = JSON.parse(room.wd_account); } catch(e) {}
+
+    if (r === 'admin') {
+      stateHTML = mkStateCard('admin', '💸', 'Proses Transfer Manual ke Penjual',
+        `Transfer ${fmt.currency(room.seller_total)} ke rekening penjual di bawah, lalu upload bukti.`);
+      actionsHTML = `
+        <div class="info-box" style="margin:0 16px 12px;">
+          <div class="info-box-header"><i class="fa-solid fa-money-bill-wave"></i><span class="info-box-title">Rekening Penjual</span></div>
+          <div class="info-row"><span class="info-key">Metode</span><span class="info-val">${wdAcc.method || '—'}</span></div>
+          <div class="info-row"><span class="info-key">Nomor</span><span class="info-val monospace">${wdAcc.number || '—'} <button class="copy-btn" onclick="copyText('${wdAcc.number || ''}','Nomor')"><i class="fa-regular fa-copy"></i></button></span></div>
+          <div class="info-row"><span class="info-key">Atas Nama</span><span class="info-val">${wdAcc.name || '—'}</span></div>
+          <div class="info-row"><span class="info-key" style="color:var(--green-400);font-weight:700;">Jumlah Transfer</span><span class="info-val green">${fmt.currency(room.seller_total)}</span></div>
+        </div>
+        <div style="padding:0 16px;">
+          <label class="form-label">Upload Bukti Transfer ke Penjual</label>
+          <div class="upload-area">
+            <input type="file" accept="image/*" id="upload-input-wd" onchange="AdminActions.previewWdReceipt(this)">
+            <div class="upload-icon">📸</div>
+            <div class="upload-text">Ketuk untuk pilih foto bukti transfer</div>
+          </div>
+          <div id="wd-receipt-preview"></div>
+        </div>
+        <div class="btn-row" style="margin-top:8px;">
+          <button class="btn btn-success" id="btn-submit-wd" onclick="AdminActions.submitWdReceipt(${room.id})" disabled><i class="fa-solid fa-paper-plane"></i> Upload & Konfirmasi Transfer</button>
+        </div>`;
+    } else if (r === 'seller') {
+      stateHTML = mkStateCard('waiting', '⏳', 'Withdraw Sedang Diproses Admin',
+        `Admin sedang memproses transfer ${fmt.currency(room.seller_total)} ke rekening Anda. Harap tunggu.`);
+    } else {
+      stateHTML = mkStateCard('waiting', '⏳', 'Menunggu Konfirmasi Dana Diterima',
+        'Admin sedang mencairkan dana ke penjual.');
+    }
+  }
+
+  // ── STATE: waiting_done ───────────────────────────
+  else if (state === 'waiting_done' || state === 'waiting_done_refund') {
+    const isDoneRefund = state === 'waiting_done_refund';
+    if (r === 'seller' && !isDoneRefund) {
+      stateHTML = mkStateCard('success', '🎉', 'Dana Sudah Dikirim Admin!',
+        `Admin sudah mentransfer ${fmt.currency(room.seller_total)} ke rekening Anda. Cek saldo Anda, lalu klik DONE untuk menutup room.`);
+      actionsHTML = `
+        ${room.admin_uploaded_receipt ? `<div style="padding:0 16px 12px;"><div class="form-label">Bukti Transfer dari Admin</div><div class="upload-preview"><img src="${room.admin_uploaded_receipt}" alt="Bukti WD"><span class="upload-preview-badge">✓ Terkirim</span></div></div>` : ''}
+        <button class="btn btn-success" onclick="SellerActions.markDone(${room.id})"><i class="fa-solid fa-flag-checkered"></i> ✅ DONE — Dana Diterima!</button>`;
+    } else if (r === 'buyer' && isDoneRefund) {
+      stateHTML = mkStateCard('success', '🎉', 'Refund Sudah Dikirim!',
+        `Admin sudah mentransfer refund ke rekening Anda. Cek saldo Anda, lalu klik DONE untuk menutup room.`);
+      actionsHTML = `<button class="btn btn-success" onclick="BuyerActions.markDoneRefund(${room.id})"><i class="fa-solid fa-flag-checkered"></i> ✅ DONE — Refund Diterima!</button>`;
+    } else {
+      stateHTML = mkStateCard('waiting', '⏳', 'Menunggu Konfirmasi Akhir',
+        isDoneRefund ? 'Menunggu pembeli konfirmasi terima refund.' : 'Menunggu penjual konfirmasi terima dana.');
+    }
+  }
+
+  // ── STATE: buyer_refund_menu ──────────────────────
+  else if (state === 'buyer_refund_menu') {
+    if (r === 'buyer') {
+      stateHTML = mkStateCard('active', '💸', 'Pengajuan Refund Disetujui',
+        'Admin telah memutuskan untuk melakukan refund. Masukkan data rekening Anda untuk pencairan.');
+      let wdInfo = {};
+      try { wdInfo = JSON.parse(room.wd_account); } catch(e) {}
+      actionsHTML = `
+        <div style="padding:0 16px;">
+          <div class="form-group">
+            <label class="form-label">Metode Refund</label>
+            <select class="form-select" id="ref-method"><option value="DANA">DANA</option><option value="GoPay">GoPay</option><option value="OVO">OVO</option><option value="BCA">BCA</option><option value="BRI">BRI</option><option value="BNI">BNI</option><option value="Mandiri">Mandiri</option></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Nomor Rekening / No. HP</label>
+            <input class="form-input" id="ref-account" type="text" placeholder="08123456789" inputmode="numeric">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Nama Pemilik</label>
+            <input class="form-input" id="ref-name" type="text" placeholder="Nama sesuai rekening">
+          </div>
+        </div>
+        <button class="btn btn-primary" style="margin:0 16px;" onclick="BuyerActions.submitRefundAccount(${room.id})"><i class="fa-solid fa-rotate-left"></i> Ajukan Refund ${fmt.currency(room.buyer_total)}</button>`;
+    } else {
+      stateHTML = mkStateCard('waiting', '⏳', 'Menunggu Pembeli Isi Data Refund', 'Pembeli sedang memasukkan data rekening untuk pencairan refund.');
+    }
+  }
+
+  // ── DEFAULT / COMPLETED ───────────────────────────
+  else {
+    stateHTML = mkStateCard('success', '🎉', 'Transaksi Selesai!',
+      'Room ini telah berhasil menyelesaikan satu siklus transaksi. Silakan kembali ke beranda.');
+    actionsHTML = `<button class="btn btn-primary" onclick="App.navigate('home')"><i class="fa-solid fa-house"></i> Kembali ke Beranda</button>`;
+  }
+
+  section.innerHTML = stateHTML + `<div class="section-gap"></div>`;
+  actions.innerHTML = actionsHTML;
+}
+
+function mkStateCard(type, icon, heading, subtext) {
+  return `
+    <div class="tx-state-card state-${type} fade-in">
+      <div class="tx-state-banner">
+        <div class="tx-state-icon">${icon}</div>
+        <div>
+          <div class="tx-state-text-heading">${heading}</div>
+          <div class="tx-state-text-sub">${subtext}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ─── BUYER ACTIONS ────────────────────────────────────────────
+const BuyerActions = {
+  async callAdmin(roomId) {
+    App.openConfirm('📞', 'Panggil Admin?',
+      'Admin akan masuk sebagai mediator. Pastikan Anda sudah sepakat dengan penjual mengenai harga dan produk.',
+      'Panggil Admin', 'btn-primary', async () => {
+        await updateRoom(roomId, { tx_state: 'waiting_admin_panggilan' });
+        toast('Admin sudah dipanggil! Mohon tunggu.', 'info');
+        haptic('medium');
+      });
+  },
+
+  async submitNominal(roomId) {
+    const inp = document.getElementById('input-nominal');
+    const nominal = parseFloat(inp?.value || 0);
+    if (!nominal || nominal < 10000) { toast('Minimal nominal Rp 10.000', 'warning'); return; }
+    const buyerTotal  = nominal + nominal * CONFIG.FEE_BUYER;
+    const sellerTotal = nominal - nominal * CONFIG.FEE_SELLER;
+    App.openConfirm('💰', `Total Transfer: ${fmt.currency(buyerTotal)}`,
+      `Harga: ${fmt.currency(nominal)}\nFee Rekber (5%): ${fmt.currency(nominal * CONFIG.FEE_BUYER)}\nTotal yang harus Anda transfer: ${fmt.currency(buyerTotal)}`,
+      'Setuju, Lanjutkan', 'btn-primary', async () => {
+        await updateRoom(roomId, { nominal, buyer_total: buyerTotal, seller_total: sellerTotal, tx_state: 'topup_receipt_pending' });
+        toast('Nominal dikonfirmasi. Silakan transfer ke admin.', 'success');
+        haptic('medium');
+      });
+  },
+
+  previewReceipt(input) {
+    const file = input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      document.getElementById('receipt-preview-buyer').innerHTML =
+        `<div class="upload-preview" style="margin-top:10px;"><img src="${e.target.result}" alt="Bukti"><span class="upload-preview-badge">Dipilih ✓</span></div>`;
+      document.getElementById('btn-kirim-bukti').disabled = false;
+      BuyerActions._receiptData = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  },
+
+  async submitReceipt(roomId) {
+    const receipt = BuyerActions._receiptData;
+    if (!receipt) { toast('Pilih foto bukti transfer terlebih dahulu', 'warning'); return; }
+    const btn = document.getElementById('btn-kirim-bukti');
+    btn.innerHTML = '<span class="loading-spinner"></span> Mengunggah...';
+    btn.disabled = true;
+    await updateRoom(roomId, { buyer_uploaded_receipt: receipt, tx_state: 'verifying_topup' });
+    toast('Bukti transfer berhasil dikirim ke admin!', 'success');
+    haptic('medium');
+  },
+
+  async raiseDispute(roomId) {
+    App.openConfirm('⚠️', 'Ajukan Dispute?',
+      'Dana akan DIBEKUKAN sampai admin selesai memediasi. Gunakan fitur ini hanya jika ada masalah nyata.',
+      'Ya, Ajukan Dispute', 'btn-danger', async () => {
+        await updateRoom(roomId, { tx_state: 'disputed' });
+        toast('Dispute diajukan. Admin akan segera menghubungi.', 'warning');
+        haptic('heavy');
+      });
+  },
+
+  async confirmReceived(roomId) {
+    App.openConfirm('✅', 'Konfirmasi Terima Produk?',
+      'Dengan menekan tombol ini, Anda menyatakan produk sudah diterima dengan baik. Dana akan dicairkan ke penjual.',
+      'Ya, Produk Diterima', 'btn-success', async () => {
+        await updateRoom(roomId, { tx_state: 'waiting_withdraw' });
+        toast('Konfirmasi diterima! Penjual bisa ajukan withdraw.', 'success');
+        haptic('medium');
+      });
+  },
+
+  async submitRefundAccount(roomId) {
+    const method  = document.getElementById('ref-method')?.value;
+    const number  = document.getElementById('ref-account')?.value?.trim();
+    const name    = document.getElementById('ref-name')?.value?.trim();
+    if (!number || !name) { toast('Isi semua data rekening refund', 'warning'); return; }
+    await updateRoom(roomId, { wd_account: JSON.stringify({ method, number, name }), tx_state: 'refund_receipt_pending' });
+    toast('Data refund dikirim ke admin!', 'success');
+    haptic('medium');
+  },
+
+  async markDoneRefund(roomId) {
+    App.openConfirm('🎉', 'Konfirmasi Refund Diterima?',
+      'Pastikan refund sudah masuk ke rekening Anda sebelum menekan DONE.',
+      '✅ DONE', 'btn-success', async () => {
+        const room = await fetchRoom(roomId);
+        await saveHistory(room);
+        await updateRoom(roomId, {
+          tx_state: 'select_role', status: 'empty',
+          buyer: null, seller: null, admin_joined: false,
+          nominal: 0, buyer_total: 0, seller_total: 0,
+          buyer_uploaded_receipt: null, admin_uploaded_receipt: null,
+          wd_account: '', buyer_done: false, seller_done: false,
+        });
+        State.myRole = null;
+        State.currentRoomId = null;
+        document.getElementById('nav-room').style.display = 'none';
+        toast('Transaksi selesai! Terima kasih sudah menggunakan Rekber Bang.', 'success', 5000);
+        haptic('medium');
+        await App.navigate('home');
+      });
+  },
+};
+
+// ─── SELLER ACTIONS ───────────────────────────────────────────
+const SellerActions = {
+  async confirmSent(roomId) {
+    App.openConfirm('📦', 'Konfirmasi Pengiriman?',
+      'Pastikan Anda sudah mengirimkan produk ke pembeli. Aksi ini tidak dapat dibatalkan.',
+      'Ya, Sudah Dikirim', 'btn-primary', async () => {
+        await updateRoom(roomId, { tx_state: 'waiting_delivery_confirmation' });
+        toast('Pengiriman terkonfirmasi! Menunggu pembeli konfirmasi terima.', 'info');
+        haptic('medium');
+      });
+  },
+
+  async submitWithdraw(roomId) {
+    const method = document.getElementById('wd-method')?.value;
+    const number = document.getElementById('wd-account')?.value?.trim();
+    const name   = document.getElementById('wd-name')?.value?.trim();
+    if (!number || !name) { toast('Isi semua data rekening withdraw', 'warning'); return; }
+    const room = await fetchRoom(roomId);
+    App.openConfirm('💸', `Ajukan Withdraw ${fmt.currency(room?.seller_total)}?`,
+      `Dana akan dikirim ke: ${method} ${number} (${name})`,
+      'Ajukan Withdraw', 'btn-success', async () => {
+        await updateRoom(roomId, { wd_account: JSON.stringify({ method, number, name }), tx_state: 'withdraw_receipt_pending' });
+        toast('Permintaan withdraw dikirim ke admin!', 'success');
+        haptic('medium');
+      });
+  },
+
+  async markDone(roomId) {
+    App.openConfirm('🎉', 'Konfirmasi Dana Diterima?',
+      'Pastikan dana sudah masuk ke rekening Anda sebelum menekan DONE. Room akan ditutup.',
+      '✅ DONE', 'btn-success', async () => {
+        const room = await fetchRoom(roomId);
+        await saveHistory(room);
+        await updateRoom(roomId, {
+          tx_state: 'select_role', status: 'empty',
+          buyer: null, seller: null, admin_joined: false,
+          nominal: 0, buyer_total: 0, seller_total: 0,
+          buyer_uploaded_receipt: null, admin_uploaded_receipt: null,
+          wd_account: '', buyer_done: false, seller_done: false,
+        });
+        State.myRole = null;
+        State.currentRoomId = null;
+        document.getElementById('nav-room').style.display = 'none';
+        toast('Transaksi selesai! Terima kasih sudah menggunakan Rekber Bang.', 'success', 5000);
+        haptic('medium');
+        await App.navigate('home');
+      });
+  },
+};
+
+// ─── ADMIN ACTIONS ────────────────────────────────────────────
+const AdminActions = {
+  async joinRoom(roomId) {
+    await updateRoom(roomId, { admin_joined: true, tx_state: 'topup_menu' });
+    State.myRole = 'admin';
+    State.currentRoomId = roomId;
+    document.getElementById('nav-room').style.display = '';
+    toast('Anda sudah bergabung sebagai Admin.', 'success');
+    haptic('medium');
+    await App.navigate('room', roomId);
+  },
+
+  async approvePayment(roomId) {
+    App.openConfirm('✅', 'Verifikasi Pembayaran?',
+      'Konfirmasi bahwa dana sudah masuk ke rekening Anda dan akan ditahan sebagai escrow.',
+      '✅ Dana Masuk & Aman', 'btn-success', async () => {
+        await updateRoom(roomId, { tx_state: 'waiting_delivery' });
+        toast('Pembayaran diverifikasi. Dana ditahan!', 'success');
+        haptic('medium');
+      });
+  },
+
+  async rejectPayment(roomId) {
+    App.openConfirm('❌', 'Tolak Pembayaran?',
+      'Bukti transfer tidak valid atau dana belum masuk. Pembeli harus upload ulang.',
+      'Tolak & Minta Ulang', 'btn-danger', async () => {
+        await updateRoom(roomId, { buyer_uploaded_receipt: null, tx_state: 'topup_receipt_pending' });
+        toast('Pembayaran ditolak. Pembeli diminta upload ulang.', 'warning');
+      });
+  },
+
+  async resolveRefund(roomId) {
+    App.openConfirm('💸', 'Refund ke Pembeli?',
+      'Dana akan dikembalikan penuh ke pembeli. Penjual tidak akan menerima pembayaran.',
+      'Refund ke Pembeli', 'btn-danger', async () => {
+        await updateRoom(roomId, { tx_state: 'buyer_refund_menu' });
+        toast('Dispute: Refund ke pembeli dipilih.', 'info');
+      });
+  },
+
+  async resolveRelease(roomId) {
+    App.openConfirm('✅', 'Lepas Dana ke Penjual?',
+      'Dana akan dicairkan ke penjual. Pastikan Anda sudah meninjau bukti dengan seksama.',
+      'Lepas Dana ke Penjual', 'btn-success', async () => {
+        await updateRoom(roomId, { tx_state: 'waiting_withdraw' });
+        toast('Dispute: Dana dilepas ke penjual.', 'success');
+      });
+  },
+
+  previewWdReceipt(input) {
+    const file = input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      document.getElementById('wd-receipt-preview').innerHTML =
+        `<div class="upload-preview" style="margin-top:10px;"><img src="${e.target.result}" alt="Bukti WD"><span class="upload-preview-badge">Dipilih ✓</span></div>`;
+      document.getElementById('btn-submit-wd').disabled = false;
+      AdminActions._wdReceiptData = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  },
+
+  async submitWdReceipt(roomId) {
+    const receipt = AdminActions._wdReceiptData;
+    if (!receipt) { toast('Pilih foto bukti transfer terlebih dahulu', 'warning'); return; }
+    const btn = document.getElementById('btn-submit-wd');
+    btn.innerHTML = '<span class="loading-spinner"></span> Mengunggah...';
+    btn.disabled = true;
+    await updateRoom(roomId, {
+      admin_uploaded_receipt: receipt,
+      tx_state: room => room.wd_account?.includes('refund') ? 'waiting_done_refund' : 'waiting_done',
+    });
+    // Re-fetch to decide correct state
+    const room = await fetchRoom(roomId);
+    const nextState = room.tx_state === 'refund_receipt_pending' || room.status === 'refund'
+      ? 'waiting_done_refund' : 'waiting_done';
+    await updateRoom(roomId, { admin_uploaded_receipt: receipt, tx_state: nextState });
+    toast('Bukti transfer diunggah! Menunggu konfirmasi pihak lain.', 'success');
+    haptic('medium');
+  },
+};
+
+// ─── RENDER: HISTORY VIEW ──────────────────────────────────────
+async function renderHistoryView() {
+  State.historyData = await fetchHistory();
+  renderHistoryList(State.historyData);
+
+  document.getElementById('history-search').addEventListener('input', (e) => {
+    const q = e.target.value.toLowerCase();
+    const filtered = State.historyData.filter(h =>
+      (h.tx_id || '').toLowerCase().includes(q) ||
+      (h.buyer || '').toLowerCase().includes(q) ||
+      (h.seller || '').toLowerCase().includes(q)
+    );
+    renderHistoryList(filtered);
   });
-  
-  // If special ringing notification card on Admin screen
-  if (role === 'admin' && messages.length > 0 && messages[messages.length - 1].isPanggilan) {
-    const lastMsg = messages[messages.length - 1];
-    const ringBlock = document.createElement('div');
-    ringBlock.className = 'inline-keyboard single';
-    ringBlock.style.marginTop = '0.5rem';
-    
-    ringBlock.innerHTML = `
-      <button class="tg-btn success" id="admin-accept-room-btn"><i class="fa-solid fa-check"></i> 🟢 ACCEPT & JOIN</button>
-      <button class="tg-btn danger" id="admin-cancel-room-btn"><i class="fa-solid fa-xmark"></i> 🔴 CANCEL</button>
-    `;
-    chatBody.appendChild(ringBlock);
-    
-    // Bind buttons
-    document.getElementById('admin-accept-room-btn').addEventListener('click', () => handleAdminAccept(room.id, true));
-    document.getElementById('admin-cancel-room-btn').addEventListener('click', () => handleAdminAccept(room.id, false));
+}
+
+function renderHistoryList(items) {
+  const list = document.getElementById('history-list');
+  if (!items.length) {
+    list.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">📋</div>
+        <div class="empty-title">Belum Ada Riwayat</div>
+        <div class="empty-desc">Transaksi yang berhasil diselesaikan akan muncul di sini.</div>
+      </div>`;
+    return;
   }
 
-  // If top-up receipt approval card on Admin screen
-  if (role === 'admin' && messages.length > 0 && messages[messages.length - 1].isReceiptApproval) {
-    const lastMsg = messages[messages.length - 1];
-    const approvalBlock = document.createElement('div');
-    approvalBlock.style.marginTop = '0.5rem';
-    
-    approvalBlock.innerHTML = `
-      <div class="upload-preview-sim" style="border-style: solid; margin-bottom: 0.5rem;">
-        <span class="upload-preview-text" style="color:var(--accent-green); font-weight:700;"><i class="fa-solid fa-image"></i> BUKTI TRANSFER BUYER</span>
-        <img src="${lastMsg.receiptUrl}" class="upload-dummy-img" style="height:100px;">
+  list.innerHTML = items.map(h => `
+    <div class="history-card fade-in">
+      <div class="history-icon">✅</div>
+      <div class="history-info">
+        <div class="history-id">${h.tx_id}</div>
+        <div class="history-parties">${h.buyer} ⇄ ${h.seller}</div>
+        <div class="history-room">${h.room_name} • ${h.status}</div>
       </div>
-      <div class="inline-keyboard">
-        <button class="tg-btn success" id="admin-approve-topup-btn"><i class="fa-solid fa-thumbs-up"></i> 🟢 APPROVE</button>
-        <button class="tg-btn danger" id="admin-reject-topup-btn"><i class="fa-solid fa-thumbs-down"></i> 🔴 REJECT</button>
+      <div>
+        <div class="history-amount">${fmt.currency(h.nominal)}</div>
+        <div class="history-date">${fmt.date(h.created_at)}</div>
       </div>
-    `;
-    chatBody.appendChild(approvalBlock);
-    
-    document.getElementById('admin-approve-topup-btn').addEventListener('click', () => handleAdminApproveTopup(room.id, true));
-    document.getElementById('admin-reject-topup-btn').addEventListener('click', () => handleAdminApproveTopup(room.id, false));
-  }
+    </div>`).join('');
+}
 
-  // Dispute actions on Admin screen
-  if (role === 'admin' && messages.length > 0 && messages[messages.length - 1].isDisputeAction) {
-    const actionBlock = document.createElement('div');
-    actionBlock.className = 'inline-keyboard single';
-    actionBlock.style.marginTop = '0.5rem';
-    
-    actionBlock.innerHTML = `
-      <button class="tg-btn success" id="admin-resolve-wd-btn"><i class="fa-solid fa-scale-balanced"></i> ⚖️ Mediasi: Lanjutkan ke WD Seller</button>
-      <button class="tg-btn danger" id="admin-resolve-refund-btn"><i class="fa-solid fa-undo"></i> ⚖️ Mediasi: Refund ke Buyer</button>
-    `;
-    chatBody.appendChild(actionBlock);
-    
-    document.getElementById('admin-resolve-wd-btn').addEventListener('click', () => handleAdminResolveDispute(room.id, 'wd'));
-    document.getElementById('admin-resolve-refund-btn').addEventListener('click', () => handleAdminResolveDispute(room.id, 'refund'));
-  }
+// ─── INIT USER UI ─────────────────────────────────────────────
+function initUserUI() {
+  const chip = document.getElementById('user-chip');
+  const avatarEl = document.getElementById('user-avatar-chip');
+  const nameEl   = document.getElementById('user-name-chip');
 
-  // WD processing actions on Admin Screen
-  if (role === 'admin' && messages.length > 0 && messages[messages.length - 1].isWdApproval) {
-    const actionBlock = document.createElement('div');
-    actionBlock.style.marginTop = '0.5rem';
-    
-    actionBlock.innerHTML = `
-      <button class="tg-btn warning single" id="admin-remind-buyer-btn" style="margin-bottom:0.4rem; width:100%;">
-        <i class="fa-solid fa-bell"></i> 🔔 Kirim Reminder ke Buyer (Optional)
-      </button>
-      <div class="upload-preview-sim" style="border-style: dashed; margin-bottom: 0.4rem;" id="admin-wd-tf-simulator">
-        <i class="fa-solid fa-file-invoice-dollar upload-preview-icon" style="color:var(--accent-cyan);"></i>
-        <div class="upload-preview-text">Klik untuk simulasikan struk transfer manual Anda</div>
-      </div>
-      <button class="tg-btn success" id="admin-approve-wd-btn" style="width:100%; display:none;">
-        <i class="fa-solid fa-paper-plane"></i> 📤 APPROVE & KIRIM BUKTI TF
-      </button>
-    `;
-    chatBody.appendChild(actionBlock);
-    
-    document.getElementById('admin-remind-buyer-btn').addEventListener('click', () => handleAdminSendReminder(room.id));
-    
-    const uploader = document.getElementById('admin-wd-tf-simulator');
-    const approveBtn = document.getElementById('admin-approve-wd-btn');
-    
-    uploader.addEventListener('click', () => {
-      uploader.innerHTML = `
-        <span class="upload-preview-text" style="color:var(--accent-cyan); font-weight:700;"><i class="fa-solid fa-image"></i> BUKTI TRANSFER WD</span>
-        <img src="https://dummyimage.com/600x400/06b6d4/ffffff.png&text=MANUAL+TRANSFER+SUCCESS" class="upload-dummy-img" style="height:60px;">
-      `;
-      approveBtn.style.display = 'flex';
-      logEvent('action', 'Admin mensimulasikan upload struk transfer WD bank.');
-    });
-    
-    approveBtn.addEventListener('click', () => handleAdminApproveWd(room.id));
-  }
+  avatarEl.textContent = fmt.initials(ME.username);
+  nameEl.textContent   = ME.username;
 
-  // Refund processing actions on Admin Screen
-  if (role === 'admin' && messages.length > 0 && messages[messages.length - 1].isRefundApproval) {
-    const actionBlock = document.createElement('div');
-    actionBlock.style.marginTop = '0.5rem';
-    
-    actionBlock.innerHTML = `
-      <div class="upload-preview-sim" style="border-style: dashed; margin-bottom: 0.4rem;" id="admin-refund-tf-simulator">
-        <i class="fa-solid fa-file-invoice-dollar upload-preview-icon" style="color:var(--accent-red);"></i>
-        <div class="upload-preview-text">Klik untuk simulasikan struk transfer refund Anda</div>
-      </div>
-      <button class="tg-btn danger" id="admin-approve-refund-btn" style="width:100%; display:none;">
-        <i class="fa-solid fa-paper-plane"></i> 📤 APPROVE & KIRIM BUKTI REFUND
-      </button>
-    `;
-    chatBody.appendChild(actionBlock);
-    
-    const uploader = document.getElementById('admin-refund-tf-simulator');
-    const approveBtn = document.getElementById('admin-approve-refund-btn');
-    
-    uploader.addEventListener('click', () => {
-      uploader.innerHTML = `
-        <span class="upload-preview-text" style="color:var(--accent-red); font-weight:700;"><i class="fa-solid fa-image"></i> BUKTI REFUND TRANSFER</span>
-        <img src="https://dummyimage.com/600x400/ef4444/ffffff.png&text=MANUAL+REFUND+SUCCESS" class="upload-dummy-img" style="height:60px;">
-      `;
-      approveBtn.style.display = 'flex';
-      logEvent('action', 'Admin mensimulasikan upload struk transfer refund.');
-    });
-    
-    approveBtn.addEventListener('click', () => handleAdminApproveRefund(room.id));
-  }
-
-  // Scroll body down
-  chatBody.scrollTop = chatBody.scrollHeight;
-  
-  // 2. Render bottom action inline overlay area
-  actionArea.style.display = 'none';
-  actionArea.innerHTML = '';
-  
-  // RENDER CORRESPONDING BUTTONS BASED ON TX STATE AND ROLE
-  
-  if (room.txState === 'select_role') {
-    if (role === 'buyer') {
-      actionArea.style.display = 'block';
-      
-      const el = document.createElement('div');
-      el.className = 'inline-keyboard single';
-      el.innerHTML = `
-        <button class="tg-btn success" id="buyer-join-btn-r1"><i class="fa-solid fa-arrow-right-to-bracket"></i> Masuk Room ${room.id} (Pilih Role: PEMBELI)</button>
-      `;
-      actionArea.appendChild(el);
-      
-      document.getElementById('buyer-join-btn-r1').addEventListener('click', () => handleJoinRoom(room.id, 'buyer'));
-    } 
-    else if (role === 'seller') {
-      actionArea.style.display = 'block';
-      
-      const el = document.createElement('div');
-      el.className = 'inline-keyboard single';
-      el.innerHTML = `
-        <button class="tg-btn success" id="seller-join-btn-r1"><i class="fa-solid fa-arrow-right-to-bracket"></i> Masuk Room ${room.id} (Pilih Role: PENJUAL)</button>
-      `;
-      actionArea.appendChild(el);
-      
-      document.getElementById('seller-join-btn-r1').addEventListener('click', () => handleJoinRoom(room.id, 'seller'));
-    }
-  }
-  
-  else if (room.txState === 'waiting_member') {
-    // Show exit button
-    actionArea.style.display = 'block';
-    const el = document.createElement('div');
-    el.className = 'inline-keyboard single';
-    el.innerHTML = `<button class="tg-btn danger" id="${role}-exit-btn"><i class="fa-solid fa-arrow-right-from-bracket"></i> 🚪 Keluar Room</button>`;
-    actionArea.appendChild(el);
-    
-    document.getElementById(`${role}-exit-btn`).addEventListener('click', () => handleExitRoom(room.id, role));
-  }
-  
-  else if (room.txState === 'waiting_admin_panggilan') {
-    // Show Call Admin button
-    if (role === 'buyer' || role === 'seller') {
-      actionArea.style.display = 'block';
-      
-      const el = document.createElement('div');
-      el.className = 'inline-keyboard';
-      el.innerHTML = `
-        <button class="tg-btn warning" id="${role}-call-admin-btn"><i class="fa-solid fa-bell"></i> 🔔 PANGGIL ADMIN</button>
-        <button class="tg-btn danger" id="${role}-exit-btn"><i class="fa-solid fa-arrow-right-from-bracket"></i> 🚪 Keluar</button>
-      `;
-      actionArea.appendChild(el);
-      
-      document.getElementById(`${role}-call-admin-btn`).addEventListener('click', () => handleCallAdmin(room.id));
-      document.getElementById(`${role}-exit-btn`).addEventListener('click', () => handleExitRoom(room.id, role));
-    }
-  }
-  
-  else if (room.txState === 'topup_menu') {
-    if (role === 'buyer') {
-      actionArea.style.display = 'block';
-      
-      const el = document.createElement('div');
-      el.className = 'chat-prompt-card';
-      
-      el.innerHTML = `
-        <div class="chat-prompt-title"><i class="fa-solid fa-wallet" style="color:var(--accent-cyan);"></i> INPUT HARGA BARANG</div>
-        <div class="chat-prompt-desc">Masukkan harga murni barang yang ingin dibeli. Sistem otomatis menambahkan fee 5%.</div>
-        
-        <div class="chat-prompt-quick-nominal">
-          <button class="chat-prompt-quick-btn" data-val="50000">Rp 50K</button>
-          <button class="chat-prompt-quick-btn" data-val="100000">Rp 100K</button>
-          <button class="chat-prompt-quick-btn" data-val="250000">Rp 250K</button>
-        </div>
-        
-        <div class="chat-prompt-input-group">
-          <input type="number" id="buyer-nominal-input" class="chat-prompt-input" placeholder="Misal: 100000" value="100000">
-          <button class="chat-prompt-submit-btn" id="buyer-submit-nominal-btn">SUBMIT</button>
-        </div>
-      `;
-      actionArea.appendChild(el);
-      
-      // Bind quick nominal triggers
-      const quickBtns = el.querySelectorAll('.chat-prompt-quick-btn');
-      const inputEl = document.getElementById('buyer-nominal-input');
-      quickBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-          inputEl.value = btn.getAttribute('data-val');
-        });
-      });
-      
-      document.getElementById('buyer-submit-nominal-btn').addEventListener('click', () => {
-        const val = parseInt(inputEl.value);
-        handleBuyerSubmitNominal(room.id, val);
-      });
-    }
-  }
-  
-  else if (room.txState === 'topup_receipt_pending') {
-    if (role === 'buyer') {
-      actionArea.style.display = 'block';
-      
-      const el = document.createElement('div');
-      el.className = 'chat-prompt-card';
-      
-      el.innerHTML = `
-        <div class="chat-prompt-title"><i class="fa-solid fa-camera" style="color:var(--accent-cyan);"></i> UNGGAH BUKTI TRANSFER</div>
-        
-        <div class="upload-preview-sim" id="buyer-receipt-uploader">
-          <i class="fa-solid fa-cloud-arrow-up upload-preview-icon"></i>
-          <div class="upload-preview-text">Klik untuk simulasikan Unggah Struk Bayar</div>
-        </div>
-        
-        <button class="tg-btn success" id="buyer-submit-receipt-btn" style="width:100%; display:none; margin-top:0.4rem;">
-          <i class="fa-solid fa-paper-plane"></i> Kirim Bukti Transfer
-        </button>
-        
-        <button class="tg-btn danger" id="buyer-cancel-topup-btn" style="width:100%;">
-          <i class="fa-solid fa-xmark"></i> Batalkan
-        </button>
-      `;
-      actionArea.appendChild(el);
-      
-      const uploader = document.getElementById('buyer-receipt-uploader');
-      const submitBtn = document.getElementById('buyer-submit-receipt-btn');
-      
-      uploader.addEventListener('click', () => {
-        uploader.innerHTML = `
-          <span class="upload-preview-text" style="color:var(--accent-green); font-weight:700;"><i class="fa-solid fa-image"></i> STRUK BERHASIL DI-UPLOAD</span>
-          <img src="https://dummyimage.com/600x400/10b981/ffffff.png&text=STRUK+PEMBAYARAN+ Rp +${room.buyerTotal.toLocaleString('id-ID')}" class="upload-dummy-img">
-        `;
-        submitBtn.style.display = 'flex';
-        logEvent('action', 'Pembeli mengunggah file gambar bukti transfer dummy.');
-      });
-      
-      submitBtn.addEventListener('click', () => handleBuyerUploadReceipt(room.id));
-      document.getElementById('buyer-cancel-topup-btn').addEventListener('click', () => handleExitRoom(room.id, 'buyer'));
-    }
-  }
-  
-  else if (room.txState === 'waiting_delivery') {
-    if (role === 'seller') {
-      actionArea.style.display = 'block';
-      
-      const el = document.createElement('div');
-      el.className = 'inline-keyboard single';
-      el.innerHTML = `
-        <button class="tg-btn success" id="seller-delivered-btn"><i class="fa-solid fa-truck-ramp-box"></i> ✅ BARANG SUDAH DIKIRIM</button>
-      `;
-      actionArea.appendChild(el);
-      
-      document.getElementById('seller-delivered-btn').addEventListener('click', () => handleSellerDeliver(room.id));
-    }
-  }
-  
-  else if (room.txState === 'waiting_delivery_confirmation') {
-    if (role === 'buyer') {
-      actionArea.style.display = 'block';
-      
-      const timerPill = document.createElement('div');
-      timerPill.className = 'timer-pill';
-      timerPill.innerHTML = `<i class="fa-solid fa-hourglass-half"></i> ⏳ Auto-Done aktif (2 Jam)`;
-      actionArea.appendChild(timerPill);
-      
-      const el = document.createElement('div');
-      el.className = 'inline-keyboard';
-      el.innerHTML = `
-        <button class="tg-btn success" id="buyer-accept-goods-btn"><i class="fa-solid fa-square-check"></i> ✅ BARANG DITERIMA</button>
-        <button class="tg-btn danger" id="buyer-dispute-goods-btn"><i class="fa-solid fa-circle-exclamation"></i> ❌ BARANG TIDAK SESUAI</button>
-      `;
-      actionArea.appendChild(el);
-      
-      // Inject simulated Auto-done trigger inside logs card for demo ease
-      const consolePanel = document.getElementById('console-logs');
-      if (consolePanel && !document.getElementById('fast-forward-timer-btn')) {
-        const ffBtn = document.createElement('button');
-        ffBtn.id = 'fast-forward-timer-btn';
-        ffBtn.className = 'console-clear-btn';
-        ffBtn.style.borderColor = 'var(--accent-orange)';
-        ffBtn.style.color = 'var(--accent-orange)';
-        ffBtn.style.marginTop = '0.5rem';
-        ffBtn.innerHTML = '<i class="fa-solid fa-bolt"></i> Simulasikan Waktu 2 Jam';
-        ffBtn.addEventListener('click', () => {
-          simulateAutoDone(room.id);
-          ffBtn.remove();
-        });
-        consolePanel.appendChild(ffBtn);
-      }
-      
-      document.getElementById('buyer-accept-goods-btn').addEventListener('click', () => handleBuyerAccept(room.id));
-      document.getElementById('buyer-dispute-goods-btn').addEventListener('click', () => handleBuyerDispute(room.id));
-    }
-  }
-  
-  else if (room.txState === 'waiting_withdraw') {
-    if (role === 'seller') {
-      actionArea.style.display = 'block';
-      
-      const el = document.createElement('div');
-      el.className = 'inline-keyboard single';
-      el.innerHTML = `
-        <button class="tg-btn warning" id="seller-withdraw-click-btn"><i class="fa-solid fa-wallet"></i> 💸 WITHDRAW SALDO (Rp ${room.nominal.toLocaleString('id-ID')})</button>
-      `;
-      actionArea.appendChild(el);
-      
-      document.getElementById('seller-withdraw-click-btn').addEventListener('click', () => handleSellerClickWithdraw(room.id));
-    }
-  }
-  
-  else if (room.txState === 'withdraw_submitted') {
-    if (role === 'seller') {
-      actionArea.style.display = 'block';
-      
-      const el = document.createElement('div');
-      el.className = 'chat-prompt-card';
-      
-      el.innerHTML = `
-        <div class="chat-prompt-title"><i class="fa-solid fa-building-columns" style="color:var(--accent-cyan);"></i> DATA REKENING PENCAIRAN</div>
-        <div class="chat-prompt-desc">Isi no rekening/E-wallet tujuan. Format: [No Rek] - [Bank] - [Nama Pemilik]</div>
-        
-        <input type="text" id="seller-bank-input" class="chat-prompt-input" placeholder="Misal: 0812345678 - DANA - Syahrul Gunawan" value="0812345678 - DANA - Syahrul Gunawan">
-        <button class="tg-btn success" id="seller-submit-wd-btn" style="width:100%; margin-top:0.4rem;">
-          <i class="fa-solid fa-paper-plane"></i> 📤 KIRIM PERMINTAAN WD
-        </button>
-      `;
-      actionArea.appendChild(el);
-      
-      document.getElementById('seller-submit-wd-btn').addEventListener('click', () => {
-        const val = document.getElementById('seller-bank-input').value;
-        handleSellerSubmitWd(room.id, val);
-      });
-    }
-  }
-  
-  else if (room.txState === 'waiting_done') {
-    if (role === 'seller' && !room.sellerDone) {
-      actionArea.style.display = 'block';
-      
-      const el = document.createElement('div');
-      el.className = 'inline-keyboard single';
-      el.innerHTML = `
-        <button class="tg-btn success" id="seller-confirm-receive-funds-btn"><i class="fa-solid fa-clipboard-check"></i> ✅ SAYA SUDAH MENERIMA DANA</button>
-      `;
-      actionArea.appendChild(el);
-      
-      document.getElementById('seller-confirm-receive-funds-btn').addEventListener('click', () => handleSellerConfirmFunds(room.id));
-    }
-    
-    if (role === 'buyer' || (role === 'seller' && room.sellerDone)) {
-      actionArea.style.display = 'block';
-      
-      const el = document.createElement('div');
-      el.className = 'chat-prompt-card';
-      el.style.borderColor = 'var(--accent-green)';
-      
-      const doneStatusText = (role === 'buyer') 
-        ? (room.buyerDone ? 'Menunggu Penjual mengeklik Done...' : 'Konfirmasi transaksi Anda telah selesai sepenuhnya.')
-        : (room.sellerDone ? (room.buyerDone ? 'Kedua pihak selesai!' : 'Menunggu Pembeli mengeklik Done...') : 'Konfirmasi.');
-      
-      el.innerHTML = `
-        <div class="chat-prompt-title" style="color:var(--accent-green);"><i class="fa-solid fa-handshake"></i> TRANSAKSI SELESAI</div>
-        <div class="chat-prompt-desc" style="margin-bottom:0.4rem;">${doneStatusText}</div>
-        
-        <button class="tg-btn success" id="${role}-done-confirm-btn" style="width:100%; ${ (role === 'buyer' && room.buyerDone) ? 'opacity:0.6; cursor:not-allowed;' : '' }">
-          <i class="fa-solid fa-check-double"></i> 🟢 DONE
-        </button>
-      `;
-      actionArea.appendChild(el);
-      
-      if (!(role === 'buyer' && room.buyerDone)) {
-        document.getElementById(`${role}-done-confirm-btn`).addEventListener('click', () => handleDoneClick(room.id, role));
-      }
-    }
-  }
-  
-  else if (room.txState === 'buyer_refund_menu') {
-    if (role === 'buyer') {
-      actionArea.style.display = 'block';
-      
-      const el = document.createElement('div');
-      el.className = 'inline-keyboard single';
-      el.innerHTML = `
-        <button class="tg-btn danger" id="buyer-click-refund-btn"><i class="fa-solid fa-undo"></i> 💸 AJUKAN REFUND DANA</button>
-      `;
-      actionArea.appendChild(el);
-      
-      document.getElementById('buyer-click-refund-btn').addEventListener('click', () => handleBuyerClickRefund(room.id));
-    }
-  }
-  
-  else if (room.txState === 'buyer_refund_form') {
-    if (role === 'buyer') {
-      actionArea.style.display = 'block';
-      
-      const el = document.createElement('div');
-      el.className = 'chat-prompt-card';
-      el.style.borderColor = 'var(--accent-red)';
-      
-      el.innerHTML = `
-        <div class="chat-prompt-title" style="color:var(--accent-red);"><i class="fa-solid fa-building-columns"></i> REKENING PENGEMBALIAN DANA</div>
-        <div class="chat-prompt-desc">Isi detail rekening/E-wallet tujuan refund Anda.</div>
-        
-        <input type="text" id="buyer-refund-input" class="chat-prompt-input" placeholder="Misal: 089999999 - DANA - Syahrul (Pembeli)" value="089999999 - DANA - Syahrul (Pembeli)">
-        <button class="tg-btn danger" id="buyer-submit-refund-btn" style="width:100%; margin-top:0.4rem;">
-          <i class="fa-solid fa-paper-plane"></i> 📤 KIRIM PERMINTAAN REFUND
-        </button>
-      `;
-      actionArea.appendChild(el);
-      
-      document.getElementById('buyer-submit-refund-btn').addEventListener('click', () => {
-        const val = document.getElementById('buyer-refund-input').value;
-        handleBuyerSubmitRefund(room.id, val);
-      });
-    }
-  }
-  
-  else if (room.txState === 'waiting_done_refund') {
-    if (role === 'buyer') {
-      actionArea.style.display = 'block';
-      
-      const el = document.createElement('div');
-      el.className = 'chat-prompt-card';
-      el.style.borderColor = 'var(--accent-green)';
-      
-      el.innerHTML = `
-        <div class="chat-prompt-title" style="color:var(--accent-green);"><i class="fa-solid fa-handshake"></i> REFUND TUNTAS</div>
-        <div class="chat-prompt-desc" style="margin-bottom:0.4rem;">Dana refund telah dikirim Admin. Konfirmasikan untuk menutup room.</div>
-        
-        <button class="tg-btn success" id="buyer-done-refund-btn" style="width:100%;">
-          <i class="fa-solid fa-check-double"></i> 🟢 DONE
-        </button>
-      `;
-      actionArea.appendChild(el);
-      
-      document.getElementById('buyer-done-refund-btn').addEventListener('click', () => finalizeTransaction(room.id, true));
-    }
+  if (ME.isAdmin) {
+    avatarEl.className = 'user-avatar admin';
+  } else {
+    avatarEl.className = 'user-avatar default';
   }
 }
+
+// ─── BACK BUTTON ─────────────────────────────────────────────
+document.getElementById('back-to-home-btn').addEventListener('click', () => {
+  App.navigate('home');
+});
+
+// ─── BOOT ────────────────────────────────────────────────────
+(async function init() {
+  // Telegram UI integration
+  if (tg) {
+    document.documentElement.style.setProperty('--bg-base', tg.themeParams?.bg_color || '#07090f');
+  }
+
+  initUserUI();
+  initRealtime();
+  await App.navigate('home');
+})();
