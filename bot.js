@@ -1,7 +1,7 @@
 /*
    ==========================================================================
-   REKBER BANG - TELEGRAM BOT SERVER (UPGRADED INTERACTIVE MENU & REALTIME NOTIFIER)
-   Polished persistent keyboard menu, Supabase live queries, and Realtime alerts.
+   REKBER BANG - TELEGRAM BOT SERVER (HIGHLY INTERACTIVE INLINE KEYBOARD MENU)
+   Implements direct inline buttons under messages to guarantee 100% visibility.
    ==========================================================================
 */
 
@@ -76,9 +76,7 @@ function sendMessage(chatId, text, replyMarkup = null) {
     res.on('data', chunk => body += chunk);
     res.on('end', () => {
       const resp = JSON.parse(body);
-      if (resp.ok) {
-        log('sent', `Berhasil mengirim pesan ke Chat ID ${chatId}`);
-      } else {
+      if (!resp.ok) {
         log('err', `Gagal mengirim pesan: ${resp.description}`);
       }
     });
@@ -92,8 +90,163 @@ function sendMessage(chatId, text, replyMarkup = null) {
   req.end();
 }
 
+// Answer Callback Query to stop the loading spinner on Telegram buttons
+function answerCallbackQuery(callbackQueryId) {
+  const payload = { callback_query_id: callbackQueryId };
+  const data = JSON.stringify(payload);
+  const options = {
+    hostname: 'api.telegram.org',
+    port: 443,
+    path: `/bot${token}/answerCallbackQuery`,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': data.length
+    }
+  };
+  const req = https.request(options);
+  req.write(data);
+  req.end();
+}
+
+// --- Menu Command Handlers ---
+
+// Reusable custom inline keyboard menu
+const inlineMenuMarkup = {
+  inline_keyboard: [
+    [
+      { text: "🚀 Buka WebApp Rekber", web_app: { url: "https://gulinginaja.github.io/RekberBang/" } }
+    ],
+    [
+      { text: "📊 Statistik Rekber", callback_data: "menu_stats" },
+      { text: "🚪 Cek Status Room", callback_data: "menu_rooms" }
+    ],
+    [
+      { text: "❓ Panduan Penggunaan", callback_data: "menu_guide" },
+      { text: "📞 Hubungi Admin", callback_data: "menu_admin" }
+    ]
+  ]
+};
+
+async function handleStatsCommand(chatId) {
+  log('info', `Mengambil statistik live dari Supabase...`);
+  try {
+    const { data: dbStats, error } = await supabase.from('rekber_stats').select('*').single();
+    if (!error && dbStats) {
+      const statsMsg = `<b>📊 STATISTIK LIVE REKBER BANG</b>\n\n` +
+        `• 💸 <b>Total Volume Escrow:</b>\n` +
+        `  👉 <code>Rp ${Number(dbStats.total_volume).toLocaleString('id-ID')}</code>\n\n` +
+        `• 🤝 <b>Total Transaksi Sukses:</b>\n` +
+        `  👉 <b>${Number(dbStats.total_transactions).toLocaleString('id-ID')} Transaksi</b>\n\n` +
+        `🛡️ <i>Transaksi Anda dijamin aman 100% menggunakan perlindungan rekening penampungan Admin!</i>`;
+      sendMessage(chatId, statsMsg, inlineMenuMarkup);
+    } else {
+      throw new Error(error ? error.message : "Data kosong");
+    }
+  } catch (e) {
+    log('err', `Gagal mengambil statistik: ${e.message}`);
+    sendMessage(chatId, `⚠️ <b>Gagal memuat statistik.</b> Silakan coba beberapa saat lagi.`, inlineMenuMarkup);
+  }
+}
+
+async function handleRoomsCommand(chatId) {
+  log('info', `Mengambil status 5 room dari Supabase...`);
+  try {
+    const { data: dbRooms, error } = await supabase.from('rekber_rooms').select('*').order('id');
+    if (!error && dbRooms && dbRooms.length > 0) {
+      let roomsMsg = `<b>🚪 STATUS LIVE ROOM REKBER BANG</b>\n\n` +
+        `Berikut adalah status aktif dari kelima kamar transaksi:\n\n`;
+      
+      dbRooms.forEach(room => {
+        let statusEmoji = '⚪';
+        let statusText = 'KOSONG';
+        let details = '<i>Siap digunakan</i>';
+        
+        if (room.status === 'half') {
+          statusEmoji = '🟡';
+          statusText = 'ONLINE (1/2)';
+          const inside = room.buyer ? `Pembeli: ${room.buyer}` : `Penjual: ${room.seller}`;
+          details = `⏳ Menunggu lawan main | ${inside}`;
+        } else if (room.status === 'locked') {
+          statusEmoji = '🔴';
+          statusText = 'LOCKED (2/2)';
+          details = `👥 <code>${room.buyer}</code> ⇄ <code>${room.seller}</code>\n` +
+            `   💰 Nominal: <b>Rp ${Number(room.nominal).toLocaleString('id-ID')}</b>\n` +
+            `   🚀 Status: <i>${room.tx_state.toUpperCase()}</i>`;
+        }
+        
+        roomsMsg += `${statusEmoji} <b>ROOM ${room.id} : ${statusText}</b>\n` +
+          `   ➜ ${details}\n\n`;
+      });
+      
+      roomsMsg += `💡 <i>Ingin bertransaksi? Masuk ke salah satu kamar kosong di WebApp sekarang!</i>`;
+      sendMessage(chatId, roomsMsg, inlineMenuMarkup);
+    } else {
+      throw new Error(error ? error.message : "Data kosong");
+    }
+  } catch (e) {
+    log('err', `Gagal mengambil status room: ${e.message}`);
+    sendMessage(chatId, `⚠️ <b>Gagal memuat status room.</b>`, inlineMenuMarkup);
+  }
+}
+
+function handleGuideCommand(chatId) {
+  const guideMsg = `<b>❓ PANDUAN TRANSAKSI REKBER BANG</b>\n\n` +
+    `Ikuti alur transaksi amanah berikut untuk membeli/menjual produk digital:\n\n` +
+    `1️⃣ <b>Pilih Kamar & Role</b>:\n` +
+    `   Masuk ke kamar kosong di WebApp sebagai Pembeli atau Penjual. Kamar akan terkunci otomatis saat kedua pihak sudah masuk (2/2).\n\n` +
+    `2️⃣ <b>Panggil Admin</b>:\n` +
+    `   Klik tombol PANGGIL ADMIN agar administrator bergabung menjaga room.\n\n` +
+    `3️⃣ <b>Top-Up Dana (Pembeli)</b>:\n` +
+    `   Pembeli memasukkan harga barang (otomatis ditambah fee 5% untuk kas admin). Transfer manual ke rekening admin dan upload struk bayar.\n\n` +
+    `4️⃣ <b>Kirim Produk (Penjual)</b>:\n` +
+    `   Dana aman ditahan oleh Admin. Penjual silakan mengirim produk ke pembeli, lalu klik "Barang Sudah Dikirim".\n\n` +
+    `5️⃣ <b>Withdraw Bersih (Penjual)</b>:\n` +
+    `   Pembeli memeriksa produk, lalu klik "Barang Diterima". Penjual klik Withdraw (potongan fee WD 2.5%), isi rekening. Admin mentransfer manual dan mengirimkan struk.\n\n` +
+    `6️⃣ <b>DONE & Selesai</b>:\n` +
+    `   Keduanya mengklik DONE untuk menutup room dan mencatat history.`;
+  
+  sendMessage(chatId, guideMsg, inlineMenuMarkup);
+}
+
+function handleAdminCommand(chatId) {
+  const adminMsg = `<b>📞 DIREKTORI HUBUNGI ADMIN</b>\n\n` +
+    `Butuh bantuan mediasi manual, bantuan teknis, atau pertanyaan kerja sama? Hubungi kami langsung di:\n\n` +
+    `• 👑 <b>Telegram Founder/Admin:</b> @Admin_RekberBang\n` +
+    `• 🛡️ <b>Grup Support Resmi:</b> @RekberBangSupportGroup\n` +
+    `• 🕒 <b>Jam Operasional:</b> 24/7 Selalu Aktif Amanah\n\n` +
+    `<i>⚠️ HATI-HATI PENIPUAN! Admin kami TIDAK PERNAH mengirim pesan pertama kali (DM first) kepada Anda! Pastikan selalu memanggil Admin melalui tombol resmi di dalam kamar transaksi WebApp.</i>`;
+  
+  sendMessage(chatId, adminMsg, inlineMenuMarkup);
+}
+
 // Process single update from Long Polling
 async function handleUpdate(update) {
+  // 1. Handle Inline Callback Queries (Taps on Inline Buttons)
+  if (update.callback_query) {
+    const callbackQuery = update.callback_query;
+    const chatId = callbackQuery.message.chat.id;
+    const username = callbackQuery.from.username ? `@${callbackQuery.from.username}` : callbackQuery.from.first_name;
+    const data = callbackQuery.data;
+    
+    log('recv', `Callback Query dari: ${username} (Chat ID: ${chatId}) -> "${data}"`);
+    
+    // Acknowledge the callback immediately so Telegram stops showing loading spinner
+    answerCallbackQuery(callbackQuery.id);
+    
+    if (data === "menu_stats") {
+      await handleStatsCommand(chatId);
+    } else if (data === "menu_rooms") {
+      await handleRoomsCommand(chatId);
+    } else if (data === "menu_guide") {
+      handleGuideCommand(chatId);
+    } else if (data === "menu_admin") {
+      handleAdminCommand(chatId);
+    }
+    return;
+  }
+
+  // 2. Handle Direct Text Messages
   if (!update.message || !update.message.chat) return;
 
   const chatId = update.message.chat.id;
@@ -102,134 +255,21 @@ async function handleUpdate(update) {
 
   log('recv', `Dari: ${username} (Chat ID: ${chatId}) -> "${text}"`);
 
-  // Define persistent custom reply keyboard menu
-  const persistentKeyboard = {
-    keyboard: [
-      [
-        { text: "🚀 Buka WebApp Rekber", web_app: { url: "https://gulinginaja.github.io/RekberBang/" } }
-      ],
-      [
-        { text: "📊 Statistik Rekber" },
-        { text: "🚪 Cek Status Room" }
-      ],
-      [
-        { text: "❓ Panduan Penggunaan" },
-        { text: "📞 Hubungi Admin" }
-      ]
-    ],
-    resize_keyboard: true,
-    one_time_keyboard: false
-  };
-
   if (text.startsWith('/start') || text.toLowerCase() === 'menu' || text.toLowerCase() === '/menu') {
     const welcomeMsg = `<b>👋 Halo ${username}! Selamat datang di Rekber Bang Bot!</b>\n\n` +
       `Sistem Rekber virtual teraman, tercanggih, dan elegan di Telegram dengan integrasi Cloud Supabase.\n\n` +
       `📌 <b>Detail Koneksi Anda:</b>\n` +
       `• Username: <code>${username}</code>\n` +
       `• Chat ID: <code>${chatId}</code>\n\n` +
-      `💡 <i>Gunakan menu tombol di bawah keyboard Anda untuk berinteraksi secara instan, membuka WebApp, atau memeriksa transaksi!</i>`;
+      `💡 <i>Gunakan menu tombol di bawah ini untuk membuka aplikasi secara instan, memantau statistik, atau panduan penggunaan!</i>`;
 
-    sendMessage(chatId, welcomeMsg, persistentKeyboard);
-  } 
-  
-  else if (text === "📊 Statistik Rekber") {
-    log('info', `Mengambil statistik live dari Supabase...`);
-    try {
-      const { data: dbStats, error } = await supabase.from('rekber_stats').select('*').single();
-      if (!error && dbStats) {
-        const statsMsg = `<b>📊 STATISTIK LIVE REKBER BANG</b>\n\n` +
-          `• 💸 <b>Total Volume Escrow:</b>\n` +
-          `  👉 <pre>Rp ${Number(dbStats.total_volume).toLocaleString('id-ID')}</pre>\n\n` +
-          `• 🤝 <b>Total Transaksi Sukses:</b>\n` +
-          `  👉 <b>${Number(dbStats.total_transactions).toLocaleString('id-ID')} Transaksi</b>\n\n` +
-          `🛡️ <i>Transaksi Anda dijamin aman 100% menggunakan perlindungan rekening penampungan Admin!</i>`;
-        sendMessage(chatId, statsMsg, persistentKeyboard);
-      } else {
-        throw new Error(error ? error.message : "Data kosong");
-      }
-    } catch (e) {
-      log('err', `Gagal mengambil statistik: ${e.message}`);
-      sendMessage(chatId, `⚠️ <b>Gagal memuat statistik.</b> Hubungi admin jika masalah berlanjut.`, persistentKeyboard);
-    }
-  } 
-  
-  else if (text === "🚪 Cek Status Room") {
-    log('info', `Mengambil status 5 room dari Supabase...`);
-    try {
-      const { data: dbRooms, error } = await supabase.from('rekber_rooms').select('*').order('id');
-      if (!error && dbRooms && dbRooms.length > 0) {
-        let roomsMsg = `<b>🚪 STATUS LIVE ROOM REKBER BANG</b>\n\n` +
-          `Berikut adalah status aktif dari kelima kamar transaksi:\n\n`;
-        
-        dbRooms.forEach(room => {
-          let statusEmoji = '⚪';
-          let statusText = 'KOSONG';
-          let details = '<i>Siap digunakan</i>';
-          
-          if (room.status === 'half') {
-            statusEmoji = '🟡';
-            statusText = 'ONLINE (1/2)';
-            const inside = room.buyer ? `Pembeli: ${room.buyer}` : `Penjual: ${room.seller}`;
-            details = `⏳ Menunggu lawan main | ${inside}`;
-          } else if (room.status === 'locked') {
-            statusEmoji = '🔴';
-            statusText = 'LOCKED (2/2)';
-            details = `👥 <code>${room.buyer}</code> ⇄ <code>${room.seller}</code>\n` +
-              `   💰 Nominal: <b>Rp ${Number(room.nominal).toLocaleString('id-ID')}</b>\n` +
-              `   🚀 Status: <i>${room.tx_state.toUpperCase()}</i>`;
-          }
-          
-          roomsMsg += `${statusEmoji} <b>ROOM ${room.id} : ${statusText}</b>\n` +
-            `   ➜ ${details}\n\n`;
-        });
-        
-        roomsMsg += `💡 <i>Ingin bertransaksi? Masuk ke salah satu kamar kosong di WebApp sekarang!</i>`;
-        sendMessage(chatId, roomsMsg, persistentKeyboard);
-      } else {
-        throw new Error(error ? error.message : "Data kosong");
-      }
-    } catch (e) {
-      log('err', `Gagal mengambil status room: ${e.message}`);
-      sendMessage(chatId, `⚠️ <b>Gagal memuat status room.</b>`, persistentKeyboard);
-    }
-  } 
-  
-  else if (text === "❓ Panduan Penggunaan") {
-    const guideMsg = `<b>❓ PANDUAN TRANSAKSI REKBER BANG</b>\n\n` +
-      `Ikuti alur transaksi amanah berikut untuk membeli/menjual produk digital:\n\n` +
-      `1️⃣ <b>Pilih Kamar & Role</b>:\n` +
-      `   Masuk ke kamar kosong di WebApp sebagai Pembeli atau Penjual. Kamar akan terkunci otomatis saat kedua pihak sudah masuk (2/2).\n\n` +
-      `2️⃣ <b>Panggil Admin</b>:\n` +
-      `   Klik tombol PANGGIL ADMIN agar administrator bergabung menjaga room.\n\n` +
-      `3️⃣ <b>Top-Up Dana (Pembeli)</b>:\n` +
-      `   Pembeli memasukkan harga barang (otomatis ditambah fee 5% untuk kas admin). Transfer manual ke rekening admin dan upload struk bayar.\n\n` +
-      `4️⃣ <b>Kirim Produk (Penjual)</b>:\n` +
-      `   Dana aman ditahan oleh Admin. Penjual silakan mengirim produk ke pembeli, lalu klik "Barang Sudah Dikirim".\n\n` +
-      `5️⃣ <b>Withdraw Bersih (Penjual)</b>:\n` +
-      `   Pembeli memeriksa produk, lalu klik "Barang Diterima". Penjual klik Withdraw (potongan fee WD 2.5%), isi rekening. Admin mentransfer manual dan mengirimkan struk.\n\n` +
-      `6️⃣ <b>DONE & Selesai</b>:\n` +
-      `   Keduanya mengklik DONE untuk menutup room dan mencatat history.`;
-    
-    sendMessage(chatId, guideMsg, persistentKeyboard);
-  } 
-  
-  else if (text === "📞 Hubungi Admin") {
-    const adminMsg = `<b>📞 DIREKTORI HUBUNGI ADMIN</b>\n\n` +
-      `Butuh bantuan mediasi manual, bantuan teknis, atau pertanyaan kerja sama? Hubungi kami langsung di:\n\n` +
-      `• 👑 <b>Telegram Founder/Admin:</b> @Admin_RekberBang\n` +
-      `• 🛡️ <b>Grup Support Resmi:</b> @RekberBangSupportGroup\n` +
-      `• 🕒 <b>Jam Operasional:</b> 24/7 Selalu Aktif Amanah\n\n` +
-      `<i>⚠️ HATI-HATI PENIPUAN! Admin kami TIDAK PERNAH mengirim pesan pertama kali (DM first) kepada Anda! Pastikan selalu memanggil Admin melalui tombol resmi di dalam kamar transaksi WebApp.</i>`;
-    
-    sendMessage(chatId, adminMsg, persistentKeyboard);
-  } 
-  
-  else {
+    sendMessage(chatId, welcomeMsg, inlineMenuMarkup);
+  } else {
     const echoMsg = `<b>📝 Pesan Diterima:</b>\n` +
       `"<i>${text}</i>"\n\n` +
-      `Gunakan menu tombol interaktif di bawah keyboard Anda untuk bantuan alur langsung, atau ketik <code>menu</code> untuk memunculkan kembali tombol menu utama.`;
+      `Silakan gunakan menu tombol interaktif di bawah ini untuk memantau status atau ketik <code>/start</code> untuk memunculkan kembali menu utama.`;
     
-    sendMessage(chatId, echoMsg, persistentKeyboard);
+    sendMessage(chatId, echoMsg, inlineMenuMarkup);
   }
 }
 
