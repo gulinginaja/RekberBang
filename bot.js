@@ -135,19 +135,20 @@ async function handleStatsCommand(chatId) {
     if (!error && dbStats) {
       const statsMsg = `<b>📊 STATISTIK LIVE REKBER BANG</b>\n\n` +
         `• 💸 <b>Total Volume Escrow:</b>\n` +
-        `  👉 <code>Rp ${Number(dbStats.total_volume).toLocaleString('id-ID')}</code>\n\n` +
+        `  👉 <code>Rp ${Number(dbStats.total_volume || 0).toLocaleString('id-ID')}</code>\n\n` +
         `• 🤝 <b>Total Transaksi Sukses:</b>\n` +
-        `  👉 <b>${Number(dbStats.total_transactions).toLocaleString('id-ID')} Transaksi</b>\n\n` +
-        `🛡️ <i>Transaksi Anda dijamin aman 100% menggunakan perlindungan rekening penampungan Admin!</i>`;
+        `  👉 <b>${Number(dbStats.total_transactions || 0).toLocaleString('id-ID')} Transaksi</b>\n\n` +
+        `🛡️ <i>Transaksi Anda dijamin aman menggunakan perlindungan rekening penampungan Admin!</i>`;
       sendMessage(chatId, statsMsg, inlineMenuMarkup);
     } else {
-      throw new Error(error ? error.message : "Data kosong");
+      throw new Error(error ? error.message : 'Data tidak tersedia');
     }
   } catch (e) {
     log('err', `Gagal mengambil statistik: ${e.message}`);
     sendMessage(chatId, `⚠️ <b>Gagal memuat statistik.</b> Silakan coba beberapa saat lagi.`, inlineMenuMarkup);
   }
 }
+
 
 async function handleRoomsCommand(chatId) {
   log('info', `Mengambil status 5 room dari Supabase...`);

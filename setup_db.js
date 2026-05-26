@@ -90,7 +90,7 @@ async function main() {
     const statCount = parseInt(statRows[0].count);
     if (statCount === 0) {
       console.log("Pre-populating default statistics...");
-      await client.query("INSERT INTO rekber_stats (id, total_volume, total_transactions) VALUES (1, 34500000, 1420)");
+      await client.query("INSERT INTO rekber_stats (id, total_volume, total_transactions) VALUES (1, 0, 0)");
     }
 
     // 5. Enable Realtime Replication for rekber_rooms

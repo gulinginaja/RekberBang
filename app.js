@@ -351,8 +351,8 @@ async function renderHomeView() {
   // Load stats
   const stats = await fetchStats();
   if (stats) {
-    document.getElementById('home-stat-volume').textContent = fmt.shortCurrency(stats.total_volume);
-    document.getElementById('home-stat-tx').textContent = Number(stats.total_transactions).toLocaleString('id-ID') + ' Tx';
+    document.getElementById('home-stat-volume').textContent = fmt.shortCurrency(stats.total_volume || 0);
+    document.getElementById('home-stat-tx').textContent = Number(stats.total_transactions || 0).toLocaleString('id-ID') + ' Tx';
   }
 
   // Load rooms
