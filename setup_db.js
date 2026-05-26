@@ -9,7 +9,7 @@ const { Client } = require('pg');
 require('dotenv').config();
 
 // Direct connection fallback using the password provided
-const connectionString = process.env.DATABASE_URL || "postgresql://postgres:Swaetczher9@db.jnnisjenjogcgzponmjl.supabase.co:5432/postgres";
+const connectionString = "postgresql://postgres.jnnisjenjogcgzponmjl:Swaetczher9@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres";
 
 const client = new Client({
   connectionString: connectionString,
@@ -93,7 +93,14 @@ async function main() {
       await client.query("INSERT INTO rekber_stats (id, total_volume, total_transactions) VALUES (1, 0, 0)");
     }
 
-    // 5. Enable Realtime Replication for rekber_rooms
+    // 5. Disable Row Level Security (RLS) so anon key can read/write
+    console.log("Disabling Row Level Security on tables...");
+    await client.query("ALTER TABLE rekber_rooms DISABLE ROW LEVEL SECURITY;");
+    await client.query("ALTER TABLE rekber_stats DISABLE ROW LEVEL SECURITY;");
+    await client.query("ALTER TABLE rekber_history DISABLE ROW LEVEL SECURITY;");
+    console.log("Row Level Security disabled!");
+
+    // 6. Enable Realtime Replication for rekber_rooms
     console.log("Enabling Supabase Realtime replication on 'rekber_rooms'...");
     await client.query(`
       DO $$
