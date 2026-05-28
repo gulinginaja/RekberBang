@@ -24,7 +24,13 @@ const CONFIG = {
 };
 
 // ─── SUPABASE CLIENT ────────────────────────────────────────
-const supabase = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY);
+// NOTE: CDN exposes `window.supabase` as the library namespace
+// We rename to `sb` to avoid variable shadowing of global `supabase`
+if (!window.supabase || typeof window.supabase.createClient !== 'function') {
+  console.error('[REKBER] window.supabase CDN not loaded!');
+  document.getElementById('rooms-list').innerHTML = '<div class="alert error" style="margin:16px"><div class="alert-text">⚠️ Gagal memuat library Supabase. Cek koneksi internet Anda dan refresh.</div></div>';
+}
+const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY);
 
 // ─── TELEGRAM SDK ────────────────────────────────────────────
 const tg = window.Telegram?.WebApp || null;
@@ -109,7 +115,7 @@ function fmtAnon(username) {
 
 // ─── DB HELPERS ───────────────────────────────────────────────
 async function fetchRooms() {
-  const { data, error } = await supabase
+  const { data, error } = await sb
     .from('rekber_rooms')
     .select('*')
     .order('id');
@@ -118,7 +124,7 @@ async function fetchRooms() {
 }
 
 async function fetchRoom(id) {
-  const { data, error } = await supabase
+  const { data, error } = await sb
     .from('rekber_rooms')
     .select('*')
     .eq('id', id)
@@ -128,7 +134,7 @@ async function fetchRoom(id) {
 }
 
 async function updateRoom(id, fields) {
-  const { error } = await supabase
+  const { error } = await sb
     .from('rekber_rooms')
     .update({ ...fields, updated_at: new Date().toISOString() })
     .eq('id', id);
@@ -137,7 +143,7 @@ async function updateRoom(id, fields) {
 }
 
 async function fetchHistory() {
-  const { data, error } = await supabase
+  const { data, error } = await sb
     .from('rekber_history')
     .select('*')
     .order('created_at', { ascending: false })
@@ -148,7 +154,7 @@ async function fetchHistory() {
 
 async function saveHistory(room) {
   const txId = 'TX-' + Date.now().toString(36).toUpperCase();
-  await supabase.from('rekber_history').insert({
+  await sb.from('rekber_history').insert({
     tx_id:     txId,
     room_name: `ROOM ${room.id}`,
     buyer:     fmtAnon(room.buyer),
@@ -157,9 +163,9 @@ async function saveHistory(room) {
     status:    'SUKSES',
   });
   // Update stats
-  const { data: stats } = await supabase.from('rekber_stats').select('*').eq('id', 1).single();
+  const { data: stats } = await sb.from('rekber_stats').select('*').eq('id', 1).single();
   if (stats) {
-    await supabase.from('rekber_stats').update({
+    await sb.from('rekber_stats').update({
       total_volume:       (stats.total_volume || 0) + Number(room.nominal),
       total_transactions: (stats.total_transactions || 0) + 1,
     }).eq('id', 1);
@@ -167,14 +173,14 @@ async function saveHistory(room) {
 }
 
 async function fetchStats() {
-  const { data } = await supabase.from('rekber_stats').select('*').eq('id', 1).single();
+  const { data } = await sb.from('rekber_stats').select('*').eq('id', 1).single();
   return data;
 }
 
 // ─── REALTIME ─────────────────────────────────────────────────
 function initRealtime() {
-  if (State.realtimeChannel) supabase.removeChannel(State.realtimeChannel);
-  State.realtimeChannel = supabase
+  if (State.realtimeChannel) sb.removeChannel(State.realtimeChannel);
+  State.realtimeChannel = sb
     .channel('rekber_rooms_changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'rekber_rooms' }, async (payload) => {
       const updated = payload.new;
