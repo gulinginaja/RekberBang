@@ -3,6 +3,9 @@
 import { createClient } from '@/lib/supabase/server'
 import { TransactionStatus, FeeSplitMode } from '@/server/db/schema'
 import { resolveUserByUsername } from '@/lib/actions/user.actions'
+import { sendTelegramNotification } from '@/lib/telegram/bot'
+
+const ADMIN_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "1638657267"
 
 /**
  * Internal helper to log actions to the audit_logs table.
@@ -162,6 +165,8 @@ export async function acceptTransactionInvite(transactionId: string) {
 
   await logAuditAction(supabase, transactionId, user.id, 'TRANSACTION_ACCEPTED_BY_BUYER')
 
+  await sendTelegramNotification(tx.seller_id, `✅ <b>PEMBELI BERGABUNG</b>\n\nPembeli telah menerima undangan transaksi Anda: <b>${tx.title}</b>.\nStatus: Menunggu Pembeli melakukan pembayaran ke Rekber.`)
+
   return { success: true }
 }
 
@@ -211,6 +216,10 @@ export async function submitPaymentProof(formData: FormData) {
   if (updateErr) return { error: updateErr.message }
 
   await logAuditAction(supabase, transactionId, user.id, 'PAYMENT_PROOF_UPLOADED')
+  
+  await sendTelegramNotification(ADMIN_CHAT_ID, `📸 <b>BUKTI TRANSFER DIUNGGAH</b>\n\nTransaksi: <b>${tx.title}</b>\nPembeli mengunggah bukti transfer. Silakan verifikasi di Dashboard Admin.`)
+  await sendTelegramNotification(tx.seller_id, `⏳ <b>MENUNGGU VERIFIKASI ADMIN</b>\n\nPembeli telah mentransfer dana untuk <b>${tx.title}</b>. Menunggu Admin memverifikasi pembayaran.`)
+
   return { success: true }
 }
 
@@ -232,6 +241,10 @@ export async function verifyPayment(transactionId: string) {
 
   if (updateErr) return { error: updateErr.message }
   await logAuditAction(supabase, transactionId, user.id, 'PAYMENT_APPROVED_BY_ADMIN')
+  
+  await sendTelegramNotification(tx.buyer_id, `🛡️ <b>PEMBAYARAN DIVERIFIKASI</b>\n\nDana untuk <b>${tx.title}</b> telah diamankan oleh Admin.`)
+  await sendTelegramNotification(tx.seller_id, `🚚 <b>DANA AMAN, SILAKAN KIRIM BARANG</b>\n\nDana untuk <b>${tx.title}</b> telah diamankan. Silakan kirim produk/jasa ke pembeli sekarang!`)
+
   return { success: true }
 }
 
@@ -300,6 +313,9 @@ export async function submitDeliveryEvidence(formData: FormData) {
   if (updateErr) return { error: updateErr.message }
 
   await logAuditAction(supabase, transactionId, user.id, 'SELLER_DELIVERY_SUBMITTED')
+  
+  await sendTelegramNotification(tx.buyer_id, `📦 <b>BARANG DIKIRIM</b>\n\nPenjual telah mengirimkan pesanan: <b>${tx.title}</b>.\nSilakan periksa dan konfirmasi penerimaan di aplikasi.`)
+
   return { success: true }
 }
 
@@ -318,6 +334,10 @@ export async function confirmDelivery(transactionId: string) {
 
   if (error) return { error: error.message }
   await logAuditAction(supabase, transactionId, user.id, 'BUYER_CONFIRMED_DELIVERY')
+  
+  await sendTelegramNotification(tx.seller_id, `🎉 <b>PEMBELI MENGKONFIRMASI PENERIMAAN</b>\n\nPembeli telah menerima pesanan: <b>${tx.title}</b>.\nDana siap dicairkan oleh Admin.`)
+  await sendTelegramNotification(ADMIN_CHAT_ID, `💸 <b>DANA SIAP DILEPAS</b>\n\nTransaksi <b>${tx.title}</b> selesai. Silakan cairkan dana ke Penjual.`)
+
   return { success: true }
 }
 
@@ -358,6 +378,11 @@ export async function raiseDispute(transactionId: string, reason: string) {
 
   if (error) return { error: error.message }
   await logAuditAction(supabase, transactionId, user.id, 'DISPUTE_RAISED', { reason })
+  
+  const opponentId = tx.buyer_id === user.id ? tx.seller_id : tx.buyer_id;
+  await sendTelegramNotification(opponentId, `⚠️ <b>DISPUTE DIAJUKAN</b>\n\nPihak lawan mengajukan dispute untuk transaksi <b>${tx.title}</b>. Dana dibekukan. Admin akan memediasi.`)
+  await sendTelegramNotification(ADMIN_CHAT_ID, `⚖️ <b>DISPUTE BARU!</b>\n\nTransaksi <b>${tx.title}</b> sedang bermasalah. Mohon segera periksa Dispute Center.`)
+
   return { success: true }
 }
 
@@ -398,6 +423,10 @@ export async function resolveDispute(
     .eq('transaction_id', transactionId)
 
   await logAuditAction(supabase, transactionId, user.id, 'DISPUTE_RESOLVED', { resolution, notes, sellerAmount, buyerAmount })
+  
+  await sendTelegramNotification(tx.buyer_id, `⚖️ <b>DISPUTE SELESAI</b>\n\nResolusi untuk <b>${tx.title}</b> telah diputuskan oleh Admin. Cek aplikasi untuk detailnya.`)
+  await sendTelegramNotification(tx.seller_id, `⚖️ <b>DISPUTE SELESAI</b>\n\nResolusi untuk <b>${tx.title}</b> telah diputuskan oleh Admin. Cek aplikasi untuk detailnya.`)
+
   return { success: true }
 }
 

@@ -25,7 +25,7 @@ CREATE TABLE public.users (
 -- Transactions Table
 CREATE TABLE public.transactions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    buyer_id UUID REFERENCES public.users(id) NOT NULL,
+    buyer_id UUID REFERENCES public.users(id),
     seller_id UUID REFERENCES public.users(id) NOT NULL,
     title TEXT NOT NULL,
     description TEXT NOT NULL,
@@ -36,7 +36,7 @@ CREATE TABLE public.transactions (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     CONSTRAINT amount_positive CHECK (amount > 0),
-    CONSTRAINT must_have_different_buyer_seller CHECK (buyer_id != seller_id)
+    CONSTRAINT must_have_different_buyer_seller CHECK (buyer_id IS NULL OR buyer_id != seller_id)
 );
 
 -- Disputes
@@ -104,7 +104,7 @@ CREATE POLICY "Users can update their own profile" ON public.users FOR UPDATE US
 -- transactions policies
 CREATE POLICY "View transactions" ON public.transactions FOR SELECT USING (auth.uid() = buyer_id OR auth.uid() = seller_id OR public.is_admin());
 CREATE POLICY "Insert transactions" ON public.transactions FOR INSERT WITH CHECK (auth.uid() = buyer_id OR auth.uid() = seller_id);
-CREATE POLICY "Update transactions (Users)" ON public.transactions FOR UPDATE USING (auth.uid() = buyer_id OR auth.uid() = seller_id) WITH CHECK (NEW.status NOT IN ('FUNDED', 'RELEASED', 'REFUNDED'));
+CREATE POLICY "Update transactions (Users)" ON public.transactions FOR UPDATE USING (auth.uid() = buyer_id OR auth.uid() = seller_id) WITH CHECK (status NOT IN ('FUNDED', 'RELEASED', 'REFUNDED'));
 CREATE POLICY "Update transactions (Admins)" ON public.transactions FOR UPDATE USING (public.is_admin());
 
 -- disputes policies

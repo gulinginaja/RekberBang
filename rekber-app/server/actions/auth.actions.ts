@@ -112,3 +112,16 @@ export async function logout() {
   const supabase = await createClient()
   await supabase.auth.signOut()
 }
+
+export async function acceptTerms() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorized' }
+
+  const { error } = await supabase.from('users')
+    .update({ terms_accepted_at: new Date().toISOString() })
+    .eq('id', user.id)
+
+  if (error) return { error: error.message }
+  return { success: true }
+}

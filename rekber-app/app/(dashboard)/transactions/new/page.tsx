@@ -1,9 +1,12 @@
 import { CreateTransactionForm } from '@/components/transactions/CreateTransactionForm'
+import { TermsGate } from '@/components/auth/terms-gate'
 
 export default function NewTransactionPage() {
   return (
-    <div className="pb-10">
-      <CreateTransactionForm />
-    </div>
+    <TermsGate>
+      <div className="pb-10">
+        <CreateTransactionForm />
+      </div>
+    </TermsGate>
   )
 }

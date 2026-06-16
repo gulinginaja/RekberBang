@@ -1,6 +1,7 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
+import { NonTelegramFallback } from './non-telegram-fallback'
 
 interface TMAContextType {
   initData: string | null
@@ -33,6 +34,10 @@ export function TMAProvider({ children }: { children: ReactNode }) {
       setIsReady(true) // Set to true anyway to allow non-TMA dev testing if needed
     }
   }, [])
+
+  if (isReady && !initData && process.env.NODE_ENV === 'production') {
+    return <NonTelegramFallback />
+  }
 
   return (
     <TMAContext.Provider value={{ initData, initDataUnsafe, isReady }}>
