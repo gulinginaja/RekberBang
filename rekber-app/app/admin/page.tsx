@@ -1,39 +1,59 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import AdminDashboard from './admin-dashboard-client'
 
 export default async function AdminPage() {
   const supabase = await createClient()
-  
   const { data: { user } } = await supabase.auth.getUser()
-  
-  if (!user) {
-    redirect('/')
-  }
 
-  // Placeholder check for admin status
-  const { data: userData } = await supabase.from('users').select('is_admin').eq('id', user.id).single()
-  
-  if (!userData?.is_admin) {
-    return (
-      <div className="p-4 text-red-500 bg-red-50 rounded-md border border-red-200">
-        You do not have permission to view this page.
-      </div>
-    )
-  }
+  if (!user) redirect('/')
+
+  // Verify Admin
+  const { data: publicUser } = await supabase.from('users').select('is_admin').eq('id', user.id).single()
+  if (!publicUser?.is_admin) redirect('/dashboard')
+
+  // Fetch Action Queue
+  const { data: queue } = await supabase
+    .from('transactions')
+    .select(`
+      *,
+      buyer:buyer_id (username),
+      seller:seller_id (username),
+      evidences (*),
+      disputes (*)
+    `)
+    .in('status', ['PAYMENT_UNDER_REVIEW', 'DELIVERED', 'DISPUTED'])
+    .order('updated_at', { ascending: false })
+
+  // Fetch All Transactions
+  const { data: allTransactions } = await supabase
+    .from('transactions')
+    .select('*, buyer:buyer_id(username), seller:seller_id(username)')
+    .order('created_at', { ascending: false })
+    .limit(50)
+
+  // Fetch Users
+  const { data: users } = await supabase
+    .from('users')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(50)
+
+  // Fetch Audit Logs
+  const { data: logs } = await supabase
+    .from('audit_logs')
+    .select('*, actor:actor_id(username)')
+    .order('created_at', { ascending: false })
+    .limit(100)
 
   return (
-    <div className="space-y-4">
-      <h2 className="text-xl font-bold">Overview</h2>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-white p-4 rounded-lg shadow-sm border">
-          <p className="text-sm text-slate-500">Active Disputes</p>
-          <p className="text-2xl font-semibold">0</p>
-        </div>
-        <div className="bg-white p-4 rounded-lg shadow-sm border">
-          <p className="text-sm text-slate-500">Total Volume</p>
-          <p className="text-2xl font-semibold">Rp 0</p>
-        </div>
-      </div>
+    <div className="p-4 md:p-8 max-w-6xl mx-auto pb-24">
+      <AdminDashboard 
+        queue={queue || []} 
+        allTransactions={allTransactions || []}
+        users={users || []}
+        logs={logs || []}
+      />
     </div>
   )
 }

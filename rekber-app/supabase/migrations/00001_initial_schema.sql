@@ -141,7 +141,7 @@ CREATE POLICY "Upload to evidence bucket" ON storage.objects FOR INSERT WITH CHE
 
 -- Seed Data
 INSERT INTO public.users (id, telegram_id, username, is_admin) VALUES 
-('00000000-0000-0000-0000-000000000001', 111111111, 'admin_rekber', true),
+('00000000-0000-0000-0000-000000000001', 1638657267, 'admin_rekber', true),
 ('00000000-0000-0000-0000-000000000002', 222222222, 'buyer_user', false),
 ('00000000-0000-0000-0000-000000000003', 333333333, 'seller_user', false)
 ON CONFLICT (telegram_id) DO NOTHING;

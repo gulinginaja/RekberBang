@@ -29,7 +29,7 @@ export interface User {
 
 export interface Transaction {
   id: string
-  buyer_id: string
+  buyer_id: string | null
   seller_id: string
   title: string
   description: string

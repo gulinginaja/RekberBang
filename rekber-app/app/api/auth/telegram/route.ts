@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createHmac } from 'crypto'
 import jwt from 'jsonwebtoken'
 import { cookies } from 'next/headers'
-import { getSupabaseAdmin } from '@/lib/supabase/admin'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export async function POST(req: Request) {
   try {
@@ -34,7 +34,7 @@ export async function POST(req: Request) {
     if (!userStr) return NextResponse.json({ error: 'No user data' }, { status: 400 })
     
     const user = JSON.parse(userStr)
-    const supabaseAdmin = getSupabaseAdmin()
+    const supabaseAdmin = createAdminClient()
     
     // Upsert user in database
     const { data: dbUser, error } = await supabaseAdmin.from('users').upsert({

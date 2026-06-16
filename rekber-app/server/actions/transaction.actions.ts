@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { TransactionStatus, FeeSplitMode } from '@/server/db/schema'
+import { resolveUserByUsername } from '@/lib/actions/user.actions'
 
 /**
  * Internal helper to log actions to the audit_logs table.
@@ -54,7 +55,6 @@ export async function createTransaction(params: {
   title: string
   description: string
   amount: number
-  seller_id: string
   fee_split_mode?: FeeSplitMode
 }) {
   const supabase = await createClient()
@@ -62,51 +62,22 @@ export async function createTransaction(params: {
   if (!user) return { error: 'Unauthorized' }
 
   if (params.amount <= 0) return { error: 'Amount must be greater than 0' }
-  if (user.id === params.seller_id) return { error: 'Buyer and Seller cannot be the same' }
 
-  // Create the transaction
   const { data: tx, error } = await supabase.from('transactions').insert({
     title: params.title,
     description: params.description,
     amount: params.amount,
-    buyer_id: user.id,
-    seller_id: params.seller_id,
+    seller_id: user.id,
+    buyer_id: null,
     fee_split_mode: params.fee_split_mode || 'SPLIT_50_50',
     status: 'CREATED'
   }).select().single()
 
   if (error) return { error: error.message }
 
-  // Log creation
   await logAuditAction(supabase, tx.id, user.id, 'TRANSACTION_CREATED', { amount: params.amount })
 
   return { success: true, transaction: tx }
-}
-
-export async function acceptTransaction(transactionId: string) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: 'Unauthorized' }
-
-  // Fetch current state
-  const { data: tx, error: fetchErr } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
-  if (fetchErr || !tx) return { error: 'Transaction not found' }
-
-  if (tx.seller_id !== user.id) return { error: 'Only the seller can accept the transaction' }
-  
-  if (!isValidTransition(tx.status, 'WAITING_PAYMENT')) {
-    return { error: `Invalid state transition from ${tx.status} to WAITING_PAYMENT` }
-  }
-
-  const { error: updateErr } = await supabase.from('transactions')
-    .update({ status: 'WAITING_PAYMENT', updated_at: new Date().toISOString() })
-    .eq('id', transactionId)
-
-  if (updateErr) return { error: updateErr.message }
-
-  await logAuditAction(supabase, transactionId, user.id, 'TRANSACTION_ACCEPTED')
-
-  return { success: true }
 }
 
 export async function cancelTransaction(transactionId: string) {
@@ -144,7 +115,10 @@ export async function getTransactionDetail(transactionId: string) {
     .select(`
       *,
       buyer:buyer_id (id, username, first_name),
-      seller:seller_id (id, username, first_name)
+      seller:seller_id (id, username, first_name),
+      evidences (*),
+      disputes (*),
+      dispute_messages (*, sender:sender_id(username, is_admin))
     `)
     .eq('id', transactionId)
     .single()
@@ -167,3 +141,327 @@ export async function getTransactionTimeline(transactionId: string) {
   if (error) return { error: error.message }
   return { logs }
 }
+
+export async function acceptTransactionInvite(transactionId: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorized' }
+
+  const { data: tx, error: fetchErr } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
+  if (fetchErr || !tx) return { error: 'Transaction not found' }
+
+  if (tx.seller_id === user.id) return { error: 'Seller cannot accept their own invite' }
+  if (tx.buyer_id !== null) return { error: 'Transaction already has a buyer' }
+  if (tx.status !== 'CREATED') return { error: 'Transaction is no longer open for invites' }
+
+  const { error: updateErr } = await supabase.from('transactions')
+    .update({ buyer_id: user.id, status: 'WAITING_PAYMENT', updated_at: new Date().toISOString() })
+    .eq('id', transactionId)
+
+  if (updateErr) return { error: updateErr.message }
+
+  await logAuditAction(supabase, transactionId, user.id, 'TRANSACTION_ACCEPTED_BY_BUYER')
+
+  return { success: true }
+}
+
+export async function submitPaymentProof(formData: FormData) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorized' }
+
+  const transactionId = formData.get('transactionId') as string
+  const file = formData.get('file') as File
+
+  if (!transactionId || !file) return { error: 'Missing parameters' }
+  if (file.size > 5 * 1024 * 1024) return { error: 'File size must be less than 5MB' }
+
+  // Validate state
+  const { data: tx, error: txError } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
+  if (txError || !tx) return { error: 'Transaction not found' }
+  if (tx.buyer_id !== user.id) return { error: 'Only the buyer can upload payment proof' }
+  if (tx.status !== 'WAITING_PAYMENT' && tx.status !== 'PAYMENT_UNDER_REVIEW') {
+    return { error: 'Transaction is not awaiting payment' }
+  }
+
+  // Upload file
+  const fileExt = file.name.split('.').pop()
+  const fileName = `${transactionId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`
+  
+  const { data: uploadData, error: uploadError } = await supabase.storage
+    .from('rekber_evidence')
+    .upload(fileName, file, { upsert: false })
+
+  if (uploadError) return { error: `Upload failed: ${uploadError.message}` }
+
+  // Record evidence
+  const { error: evError } = await supabase.from('evidences').insert({
+    transaction_id: transactionId,
+    uploader_id: user.id,
+    file_url: uploadData.path,
+    file_type: file.type,
+    description: 'Payment Proof'
+  })
+  if (evError) return { error: evError.message }
+
+  // Update transaction status
+  const { error: updateErr } = await supabase.from('transactions')
+    .update({ status: 'PAYMENT_UNDER_REVIEW', updated_at: new Date().toISOString() })
+    .eq('id', transactionId)
+  if (updateErr) return { error: updateErr.message }
+
+  await logAuditAction(supabase, transactionId, user.id, 'PAYMENT_PROOF_UPLOADED')
+  return { success: true }
+}
+
+export async function verifyPayment(transactionId: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorized' }
+
+  // Admin Check
+  const { data: publicUser } = await supabase.from('users').select('is_admin').eq('id', user.id).single()
+  if (!publicUser?.is_admin) return { error: 'Forbidden' }
+
+  const { data: tx } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
+  if (!tx || tx.status !== 'PAYMENT_UNDER_REVIEW') return { error: 'Invalid transaction status' }
+
+  const { error: updateErr } = await supabase.from('transactions')
+    .update({ status: 'FUNDED', updated_at: new Date().toISOString() })
+    .eq('id', transactionId)
+
+  if (updateErr) return { error: updateErr.message }
+  await logAuditAction(supabase, transactionId, user.id, 'PAYMENT_APPROVED_BY_ADMIN')
+  return { success: true }
+}
+
+export async function rejectPayment(transactionId: string, reason: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorized' }
+
+  const { data: publicUser } = await supabase.from('users').select('is_admin').eq('id', user.id).single()
+  if (!publicUser?.is_admin) return { error: 'Forbidden' }
+
+  const { data: tx } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
+  if (!tx || tx.status !== 'PAYMENT_UNDER_REVIEW') return { error: 'Invalid transaction status' }
+
+  const { error: updateErr } = await supabase.from('transactions')
+    .update({ status: 'WAITING_PAYMENT', updated_at: new Date().toISOString() })
+    .eq('id', transactionId)
+
+  if (updateErr) return { error: updateErr.message }
+  await logAuditAction(supabase, transactionId, user.id, 'PAYMENT_REJECTED_BY_ADMIN', { reason })
+  return { success: true }
+}
+
+// ==========================================
+// Final Stages: Delivery, Dispute & Release
+// ==========================================
+
+export async function submitDeliveryEvidence(formData: FormData) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorized' }
+
+  const transactionId = formData.get('transactionId') as string
+  const notes = formData.get('notes') as string
+  const file = formData.get('file') as File
+
+  if (!transactionId || !file) return { error: 'Missing parameters' }
+  if (file.size > 5 * 1024 * 1024) return { error: 'File size must be less than 5MB' }
+
+  const { data: tx, error: txError } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
+  if (txError || !tx) return { error: 'Transaction not found' }
+  if (tx.seller_id !== user.id) return { error: 'Only the seller can upload delivery evidence' }
+  if (tx.status !== 'FUNDED') return { error: 'Transaction is not funded' }
+
+  const fileExt = file.name.split('.').pop()
+  const fileName = `deliveries/${transactionId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`
+  
+  const { data: uploadData, error: uploadError } = await supabase.storage
+    .from('rekber_evidence')
+    .upload(fileName, file, { upsert: false })
+
+  if (uploadError) return { error: `Upload failed: ${uploadError.message}` }
+
+  const { error: evError } = await supabase.from('evidences').insert({
+    transaction_id: transactionId,
+    uploader_id: user.id,
+    file_url: uploadData.path,
+    file_type: file.type,
+    description: `Delivery Proof: ${notes || 'No notes'}`
+  })
+  if (evError) return { error: evError.message }
+
+  const { error: updateErr } = await supabase.from('transactions')
+    .update({ status: 'DELIVERING', updated_at: new Date().toISOString() })
+    .eq('id', transactionId)
+  if (updateErr) return { error: updateErr.message }
+
+  await logAuditAction(supabase, transactionId, user.id, 'SELLER_DELIVERY_SUBMITTED')
+  return { success: true }
+}
+
+export async function confirmDelivery(transactionId: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorized' }
+
+  const { data: tx } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
+  if (!tx || tx.status !== 'DELIVERING') return { error: 'Transaction is not in delivery' }
+  if (tx.buyer_id !== user.id) return { error: 'Only the buyer can confirm delivery' }
+
+  const { error } = await supabase.from('transactions')
+    .update({ status: 'DELIVERED', updated_at: new Date().toISOString() })
+    .eq('id', transactionId)
+
+  if (error) return { error: error.message }
+  await logAuditAction(supabase, transactionId, user.id, 'BUYER_CONFIRMED_DELIVERY')
+  return { success: true }
+}
+
+export async function requestClarification(transactionId: string, message: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorized' }
+
+  const { data: tx } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
+  if (!tx || !['DELIVERING', 'DELIVERED'].includes(tx.status)) return { error: 'Cannot request clarification at this stage' }
+  if (tx.buyer_id !== user.id && tx.seller_id !== user.id) return { error: 'Unauthorized' }
+
+  await logAuditAction(supabase, transactionId, user.id, 'CLARIFICATION_REQUESTED', { message })
+  return { success: true }
+}
+
+export async function raiseDispute(transactionId: string, reason: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorized' }
+
+  const { data: tx } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
+  if (!tx || !['DELIVERING', 'DELIVERED'].includes(tx.status)) return { error: 'Cannot dispute at this stage' }
+  if (tx.buyer_id !== user.id && tx.seller_id !== user.id) return { error: 'Unauthorized' }
+
+  // Create dispute record
+  const { error: disputeErr } = await supabase.from('disputes').insert({
+    transaction_id: transactionId,
+    raiser_id: user.id,
+    reason: reason
+  })
+  if (disputeErr) return { error: disputeErr.message }
+
+  // Update status
+  const { error } = await supabase.from('transactions')
+    .update({ status: 'DISPUTED', updated_at: new Date().toISOString() })
+    .eq('id', transactionId)
+
+  if (error) return { error: error.message }
+  await logAuditAction(supabase, transactionId, user.id, 'DISPUTE_RAISED', { reason })
+  return { success: true }
+}
+
+export async function resolveDispute(
+  transactionId: string, 
+  resolution: 'RELEASE_TO_SELLER' | 'REFUND_TO_BUYER' | 'PARTIAL_SETTLEMENT', 
+  notes: string,
+  sellerAmount?: number,
+  buyerAmount?: number
+) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorized' }
+
+  const { data: publicUser } = await supabase.from('users').select('is_admin').eq('id', user.id).single()
+  if (!publicUser?.is_admin) return { error: 'Forbidden' }
+
+  const { data: tx } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
+  if (!tx || tx.status !== 'DISPUTED') return { error: 'Transaction is not disputed' }
+
+  const newStatus = resolution === 'RELEASE_TO_SELLER' ? 'RELEASED' : 
+                    resolution === 'REFUND_TO_BUYER' ? 'REFUNDED' : 'RESOLVED_PARTIAL'
+
+  const { error } = await supabase.from('transactions')
+    .update({ status: newStatus, updated_at: new Date().toISOString() })
+    .eq('id', transactionId)
+  if (error) return { error: error.message }
+
+  await supabase.from('disputes')
+    .update({ 
+      status: 'RESOLVED', 
+      resolution_notes: notes, 
+      resolved_by: user.id, 
+      resolved_at: new Date().toISOString(),
+      settlement_seller_amount: sellerAmount || 0,
+      settlement_buyer_amount: buyerAmount || 0
+    })
+    .eq('transaction_id', transactionId)
+
+  await logAuditAction(supabase, transactionId, user.id, 'DISPUTE_RESOLVED', { resolution, notes, sellerAmount, buyerAmount })
+  return { success: true }
+}
+
+export async function sendDisputeMessage(formData: FormData) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorized' }
+
+  const transactionId = formData.get('transactionId') as string
+  const message = formData.get('message') as string
+  const file = formData.get('file') as File | null
+  const isInternal = formData.get('isInternal') === 'true'
+
+  if (!transactionId || (!message && !file)) return { error: 'Message or file is required' }
+
+  // Admin Check
+  const { data: publicUser } = await supabase.from('users').select('is_admin').eq('id', user.id).single()
+  const isAdmin = publicUser?.is_admin === true
+
+  if (isInternal && !isAdmin) return { error: 'Only admins can send internal notes' }
+
+  let attachmentUrl = null
+  if (file && file.size > 0) {
+    if (file.size > 5 * 1024 * 1024) return { error: 'File too large' }
+    const fileExt = file.name.split('.').pop()
+    const fileName = `disputes/${transactionId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`
+    
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('rekber_evidence')
+      .upload(fileName, file, { upsert: false })
+      
+    if (uploadError) return { error: uploadError.message }
+    attachmentUrl = uploadData.path
+  }
+
+  const { error } = await supabase.from('dispute_messages').insert({
+    transaction_id: transactionId,
+    sender_id: user.id,
+    message: message,
+    attachment_url: attachmentUrl,
+    is_internal_note: isInternal
+  })
+
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
+export async function releaseFunds(transactionId: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorized' }
+
+  const { data: publicUser } = await supabase.from('users').select('is_admin').eq('id', user.id).single()
+  if (!publicUser?.is_admin) return { error: 'Forbidden' }
+
+  const { data: tx } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
+  if (!tx || tx.status !== 'DELIVERED') return { error: 'Cannot release funds for this status' }
+
+  const { error } = await supabase.from('transactions')
+    .update({ status: 'RELEASED', updated_at: new Date().toISOString() })
+    .eq('id', transactionId)
+
+  if (error) return { error: error.message }
+  await logAuditAction(supabase, transactionId, user.id, 'FUNDS_RELEASED_BY_ADMIN')
+  return { success: true }
+}
+
