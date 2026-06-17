@@ -71,14 +71,26 @@ export async function authenticateWithTelegram(initData: string) {
     }
 
     // Upsert into public.users (handles seeded users or partial creations)
-    const isAdmin = tgUser.id.toString() === process.env.ADMIN_TELEGRAM_ID
+    const tgIdStr = tgUser.id.toString()
+    const superAdmins = (process.env.SUPER_ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim())
+    
+    // Check if user already exists
+    const { data: existingUser } = await adminSupabase.from('users').select('role').eq('telegram_id', tgUser.id).single()
+
+    let userRole = existingUser?.role || 'user'
+    
+    // Env variable always overrides to super_admin
+    if (superAdmins.includes(tgIdStr)) {
+      userRole = 'super_admin'
+    }
+
     const { error: insertError } = await adminSupabase.from('users').upsert({
       id: newUser.user.id,
       telegram_id: tgUser.id,
       username: tgUser.username,
       first_name: tgUser.first_name,
       photo_url: tgUser.photo_url || null,
-      is_admin: isAdmin
+      role: userRole
     }, { onConflict: 'telegram_id' })
 
     if (insertError) {

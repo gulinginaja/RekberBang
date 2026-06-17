@@ -8,10 +8,22 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ShieldCheck, Copy } from 'lucide-react'
 
-export function EvidenceUploader({ transactionId, transactionAmount }: { transactionId: string, transactionAmount?: number }) {
+export function EvidenceUploader({ 
+  transactionId, 
+  transactionAmount,
+  paymentMethods = [],
+  qrisSettings = []
+}: { 
+  transactionId: string
+  transactionAmount?: number
+  paymentMethods?: any[]
+  qrisSettings?: any[]
+}) {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -31,6 +43,8 @@ export function EvidenceUploader({ transactionId, transactionAmount }: { transac
     }
   }
 
+  const hasPayments = paymentMethods.length > 0 || qrisSettings.length > 0
+
   return (
     <div className="space-y-6">
       {/* VA Checkout Style Card */}
@@ -45,26 +59,67 @@ export function EvidenceUploader({ transactionId, transactionAmount }: { transac
           </div>
         </div>
 
-        <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 mb-4">
-          <p className="text-sm text-muted-foreground mb-1">Transfer ke Rekening Bersama (BCA)</p>
-          <div className="flex items-center justify-between">
-            <span className="text-2xl font-mono font-bold tracking-wider">8273 9912 44</span>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="h-8 gap-2"
-              onClick={() => {
-                navigator.clipboard.writeText('8273991244')
-                alert('Nomor rekening disalin!')
-              }}
-              type="button"
-            >
-              <Copy className="w-4 h-4" />
-              Salin
-            </Button>
+        {paymentMethods.map(pm => (
+          <div key={pm.id} className="bg-slate-50 p-4 rounded-lg border border-slate-100 mb-4">
+            <p className="text-sm text-muted-foreground mb-1">Transfer ke {pm.bank_name}</p>
+            <div className="flex items-center justify-between">
+              <span className="text-2xl font-mono font-bold tracking-wider">{pm.account_number}</span>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="h-8 gap-2"
+                onClick={() => {
+                  navigator.clipboard.writeText(pm.account_number)
+                  alert('Nomor rekening disalin!')
+                }}
+                type="button"
+              >
+                <Copy className="w-4 h-4" />
+                Salin
+              </Button>
+            </div>
+            <p className="text-sm font-medium mt-2 text-slate-700">a.n. {pm.account_holder}</p>
           </div>
-          <p className="text-sm font-medium mt-2 text-slate-700">a.n. REKBER BANG ESCROW</p>
-        </div>
+        ))}
+
+        {qrisSettings.map(qris => (
+          <div key={qris.id} className="bg-slate-50 p-4 rounded-lg border border-slate-100 mb-4 text-center">
+            <p className="text-sm text-muted-foreground mb-2 font-semibold">{qris.name}</p>
+            <div className="flex justify-center mb-2">
+              <img 
+                src={`${supabaseUrl}/storage/v1/object/public/rekber_evidence/${qris.image_url}`} 
+                alt={qris.name} 
+                className="max-w-[200px] border p-2 bg-white rounded-lg"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = `${supabaseUrl}/storage/v1/object/authenticated/rekber_evidence/${qris.image_url}`;
+                }}
+              />
+            </div>
+          </div>
+        ))}
+
+        {!hasPayments && (
+          <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 mb-4">
+            <p className="text-sm text-muted-foreground mb-1">Transfer ke Rekening Bersama (BCA)</p>
+            <div className="flex items-center justify-between">
+              <span className="text-2xl font-mono font-bold tracking-wider">8273 9912 44</span>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="h-8 gap-2"
+                onClick={() => {
+                  navigator.clipboard.writeText('8273991244')
+                  alert('Nomor rekening disalin!')
+                }}
+                type="button"
+              >
+                <Copy className="w-4 h-4" />
+                Salin
+              </Button>
+            </div>
+            <p className="text-sm font-medium mt-2 text-slate-700">a.n. REKBER BANG ESCROW</p>
+          </div>
+        )}
 
         <div className="flex justify-between items-center py-2 border-b border-dashed">
           <span className="text-muted-foreground text-sm">Total Tagihan</span>

@@ -2,26 +2,38 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { verifyPayment, rejectPayment, releaseFunds, resolveDispute } from '@/server/actions/transaction.actions'
+import { verifyPayment, rejectPayment, releaseFunds, resolveDispute, approveTransaction, rejectTransaction } from '@/server/actions/transaction.actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { AdminQuickActions } from '@/components/admin/AdminQuickActions'
+import { AdminManagementTab } from '@/components/admin/AdminManagementTab'
+import { PaymentSettingsTab } from '@/components/admin/PaymentSettingsTab'
+import { QrisManagementTab } from '@/components/admin/QrisManagementTab'
 
 export default function AdminDashboard({ 
   queue, 
   allTransactions, 
   users, 
-  logs 
+  logs,
+  admins,
+  paymentMethods,
+  qrisSettings,
+  isSuperAdmin
 }: { 
   queue: any[]
   allTransactions: any[]
   users: any[]
   logs: any[]
+  admins?: any[]
+  paymentMethods?: any[]
+  qrisSettings?: any[]
+  isSuperAdmin?: boolean
 }) {
   const router = useRouter()
-  const [activeTab, setActiveTab] = useState<'queue' | 'transactions' | 'users' | 'logs'>('queue')
+  const [activeTab, setActiveTab] = useState<'queue' | 'transactions' | 'users' | 'logs' | 'admins' | 'payments' | 'qris'>('queue')
 
   // Queue Actions State
   const [loadingId, setLoadingId] = useState<string | null>(null)
@@ -50,7 +62,12 @@ export default function AdminDashboard({
     { id: 'queue', label: 'Action Queue', count: queue.length },
     { id: 'transactions', label: 'All Tx', count: allTransactions.length },
     { id: 'users', label: 'Users', count: users.length },
-    { id: 'logs', label: 'Audit Logs', count: logs.length }
+    { id: 'logs', label: 'Audit Logs', count: logs.length },
+    ...(isSuperAdmin ? [
+      { id: 'admins', label: 'Admins', count: admins?.length || 0 },
+      { id: 'payments', label: 'Bank Accounts', count: paymentMethods?.length || 0 },
+      { id: 'qris', label: 'QRIS Settings', count: qrisSettings?.length || 0 }
+    ] : [])
   ]
 
   return (
@@ -58,6 +75,9 @@ export default function AdminDashboard({
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <h1 className="text-2xl font-bold text-slate-800">Admin Command Center</h1>
       </div>
+      
+      {isSuperAdmin && <AdminQuickActions setActiveTab={setActiveTab as any} />}
+
 
       {/* Custom Tab Navigation */}
       <div className="flex overflow-x-auto gap-2 pb-2 scrollbar-hide">
@@ -119,6 +139,20 @@ export default function AdminDashboard({
                 <CardFooter className="flex flex-col gap-2 pt-2 border-t mt-2">
                   
                   {/* Queue Action Buttons */}
+                  {tx.status === 'PENDING_ADMIN_APPROVAL' && (
+                    <div className="w-full space-y-2">
+                      <Button onClick={() => handleAction(tx.id, () => approveTransaction(tx.id))} disabled={loadingId === tx.id} className="w-full bg-blue-600 hover:bg-blue-700">
+                        Approve Transaction
+                      </Button>
+                      <div className="flex gap-2">
+                        <Input placeholder="Reject reason..." value={reason} onChange={(e) => setReason(e.target.value)} className="h-9" />
+                        <Button onClick={() => handleAction(tx.id, () => rejectTransaction(tx.id, reason))} disabled={loadingId === tx.id || !reason} variant="destructive" className="h-9">
+                          Reject
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
                   {tx.status === 'PAYMENT_UNDER_REVIEW' && (
                     <div className="w-full space-y-2">
                       <Button onClick={() => handleAction(tx.id, () => verifyPayment(tx.id))} disabled={loadingId === tx.id} className="w-full bg-green-600 hover:bg-green-700">
@@ -259,7 +293,7 @@ export default function AdminDashboard({
                     <td className="px-4 py-3">@{u.username}</td>
                     <td className="px-4 py-3">{u.first_name} {u.last_name}</td>
                     <td className="px-4 py-3">
-                      {u.is_admin ? <Badge className="bg-red-600">Admin</Badge> : <Badge variant="secondary">User</Badge>}
+                      {u.role === 'super_admin' ? <Badge className="bg-purple-600">Super Admin</Badge> : u.role === 'admin' ? <Badge className="bg-red-600">Admin</Badge> : <Badge variant="secondary">User</Badge>}
                     </td>
                   </tr>
                 ))}
@@ -267,6 +301,20 @@ export default function AdminDashboard({
             </table>
           </div>
         </div>
+      )}
+      {/* TAB CONTENT: ADMINS */}
+      {activeTab === 'admins' && isSuperAdmin && (
+        <AdminManagementTab admins={admins || []} />
+      )}
+
+      {/* TAB CONTENT: PAYMENTS */}
+      {activeTab === 'payments' && isSuperAdmin && (
+        <PaymentSettingsTab paymentMethods={paymentMethods || []} />
+      )}
+
+      {/* TAB CONTENT: QRIS */}
+      {activeTab === 'qris' && isSuperAdmin && (
+        <QrisManagementTab qrisSettings={qrisSettings || []} />
       )}
 
       {/* TAB CONTENT: AUDIT LOGS */}

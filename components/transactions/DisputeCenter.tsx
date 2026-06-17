@@ -62,14 +62,14 @@ export function DisputeCenter({
               className={`p-3 rounded-lg w-full md:w-3/4 ${
                 msg.is_internal_note 
                   ? 'bg-yellow-100 border border-yellow-300 ml-auto' 
-                  : msg.sender?.is_admin 
+                  : (msg.sender?.role === 'admin' || msg.sender?.role === 'super_admin')
                     ? 'bg-red-100 border border-red-200 mx-auto w-full text-center' 
                     : 'bg-white border shadow-sm'
               }`}
             >
               <div className="flex justify-between items-center mb-1">
                 <span className="font-semibold text-sm">
-                  {msg.sender?.is_admin ? '🛡️ Admin' : `@${msg.sender?.username}`}
+                  {(msg.sender?.role === 'admin' || msg.sender?.role === 'super_admin') ? '🛡️ Admin' : `@${msg.sender?.username}`}
                   {msg.is_internal_note && <span className="text-yellow-700 ml-2">(Internal Note)</span>}
                 </span>
                 <span className="text-xs text-muted-foreground">{new Date(msg.created_at).toLocaleString()}</span>

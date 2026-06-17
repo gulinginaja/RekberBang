@@ -67,7 +67,7 @@ export function TransactionActionButtons({
       )}
 
       {/* CANCEL (Seller Only, before funded) */}
-      {role === 'seller' && status === 'CREATED' && (
+      {role === 'seller' && (status === 'CREATED' || status === 'PENDING_ADMIN_APPROVAL') && (
         <Button variant="outline" onClick={() => handleAction(() => cancelTransaction(transactionId))} disabled={loading}>
           Cancel Transaction
         </Button>

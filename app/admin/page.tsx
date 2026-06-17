@@ -9,8 +9,10 @@ export default async function AdminPage() {
   if (!user) redirect('/')
 
   // Verify Admin
-  const { data: publicUser } = await supabase.from('users').select('is_admin').eq('id', user.id).single()
-  if (!publicUser?.is_admin) redirect('/dashboard')
+  const { data: publicUser } = await supabase.from('users').select('role').eq('id', user.id).single()
+  if (!publicUser || publicUser.role === 'user') redirect('/dashboard')
+  
+  const isSuperAdmin = publicUser.role === 'super_admin'
 
   // Fetch Action Queue
   const { data: queue } = await supabase
@@ -46,6 +48,25 @@ export default async function AdminPage() {
     .order('created_at', { ascending: false })
     .limit(100)
 
+  // Fetch Admins
+  const { data: admins } = await supabase
+    .from('users')
+    .select('*')
+    .in('role', ['admin', 'super_admin'])
+    .order('created_at', { ascending: true })
+
+  // Fetch Payment Methods
+  const { data: paymentMethods } = await supabase
+    .from('payment_methods')
+    .select('*')
+    .order('created_at', { ascending: true })
+    
+  // Fetch QRIS
+  const { data: qrisSettings } = await supabase
+    .from('qris_settings')
+    .select('*')
+    .order('created_at', { ascending: true })
+
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto pb-24">
       <AdminDashboard 
@@ -53,6 +74,10 @@ export default async function AdminPage() {
         allTransactions={allTransactions || []}
         users={users || []}
         logs={logs || []}
+        admins={admins || []}
+        paymentMethods={paymentMethods || []}
+        qrisSettings={qrisSettings || []}
+        isSuperAdmin={isSuperAdmin}
       />
     </div>
   )

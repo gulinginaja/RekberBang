@@ -16,12 +16,16 @@ export default async function TransactionDetailPage({ params }: { params: { id: 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const { data: publicUser } = await supabase.from('users').select('is_admin').eq('id', user?.id).single()
-  const isAdmin = publicUser?.is_admin === true
+  const { data: publicUser } = await supabase.from('users').select('role').eq('id', user?.id).single()
+  const isAdmin = publicUser?.role === 'admin' || publicUser?.role === 'super_admin'
 
   if (error || !transaction) {
     return <div className="p-4 text-destructive">Failed to load transaction.</div>
   }
+
+  // Fetch Payment Methods and QRIS
+  const { data: paymentMethods } = await supabase.from('payment_methods').select('*').eq('is_active', true)
+  const { data: qrisSettings } = await supabase.from('qris_settings').select('*').eq('is_active', true)
 
   const isBuyer = user?.id === transaction.buyer?.id
   const isSeller = user?.id === transaction.seller?.id
@@ -44,11 +48,11 @@ export default async function TransactionDetailPage({ params }: { params: { id: 
           <div className="grid grid-cols-2 gap-4">
             <div>
               <p className="text-sm text-muted-foreground">Buyer</p>
-              <p className="font-medium">@{transaction.buyer?.username}</p>
+              <p className="font-medium">{transaction.buyer?.username ? `@${transaction.buyer.username}` : transaction.buyer?.first_name || 'Buyer'}</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Seller</p>
-              <p className="font-medium">@{transaction.seller?.username}</p>
+              <p className="font-medium">{transaction.seller?.username ? `@${transaction.seller.username}` : transaction.seller?.first_name || 'Seller'}</p>
             </div>
           </div>
 
@@ -60,6 +64,13 @@ export default async function TransactionDetailPage({ params }: { params: { id: 
           </div>
         </CardContent>
         <CardContent className="p-4 flex flex-col gap-2">
+          {transaction.status === 'PENDING_ADMIN_APPROVAL' && (
+             <div className="w-full p-4 bg-amber-50 text-amber-800 text-center rounded-md border border-amber-200">
+               <h4 className="font-semibold flex items-center justify-center gap-2">⏳ Menunggu Persetujuan Admin</h4>
+               <p className="text-sm mt-1">Transaksi ini sedang direview oleh Admin sebelum bisa dilanjutkan.</p>
+             </div>
+          )}
+
           {transaction.status === 'CREATED' && !transaction.buyer_id && isSeller && (
             <div className="w-full space-y-2">
               <p className="text-sm font-medium">Share this link with your Buyer:</p>
@@ -81,7 +92,12 @@ export default async function TransactionDetailPage({ params }: { params: { id: 
 
           {transaction.status === 'WAITING_PAYMENT' && isBuyer && (
              <div className="w-full">
-               <EvidenceUploader transactionId={transaction.id} transactionAmount={transaction.amount} />
+               <EvidenceUploader 
+                 transactionId={transaction.id} 
+                 transactionAmount={transaction.amount} 
+                 paymentMethods={paymentMethods || []}
+                 qrisSettings={qrisSettings || []}
+               />
              </div>
           )}
           {transaction.status === 'WAITING_PAYMENT' && !isBuyer && (
@@ -131,18 +147,44 @@ export default async function TransactionDetailPage({ params }: { params: { id: 
       {transaction.evidences && transaction.evidences.length > 0 && (
         <div className="space-y-4">
           <h3 className="font-semibold text-lg">Attached Evidence</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4">
             {transaction.evidences.map((ev: any) => (
-              <a 
-                key={ev.id} 
-                href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/authenticated/rekber_evidence/${ev.file_url}`} 
-                target="_blank"
-                rel="noreferrer"
-                className="block p-4 border rounded-md hover:bg-slate-50 transition-colors"
-              >
-                <div className="font-medium text-sm text-blue-600 truncate">{ev.description}</div>
-                <div className="text-xs text-muted-foreground mt-1">Uploaded by @{ev.uploader_id === transaction.buyer_id ? transaction.buyer.username : transaction.seller.username}</div>
-              </a>
+              <div key={ev.id} className="block p-4 border rounded-md bg-white">
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <div className="font-medium text-sm text-slate-800">{ev.purpose.replace(/_/g, ' ')}</div>
+                    <div className="text-xs text-muted-foreground mt-1">Uploaded by @{ev.uploaded_by === transaction.buyer_id ? transaction.buyer?.username : transaction.seller?.username}</div>
+                  </div>
+                  {ev.file_url ? (
+                    <a 
+                      href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/authenticated/rekber_evidence/${ev.file_url}`} 
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 transition-colors"
+                    >
+                      View Image
+                    </a>
+                  ) : (
+                    <span className="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded">Image Securely Deleted</span>
+                  )}
+                </div>
+
+                {/* Render OCR Metadata if it's a payment proof and has data */}
+                {ev.purpose === 'PAYMENT_PROOF' && ev.nominal && (
+                  <div className="mt-4 bg-slate-50 p-3 rounded text-sm border border-slate-100">
+                    <p className="font-semibold text-xs text-slate-500 mb-2 uppercase">Verified Transaction Data</p>
+                    <div className="grid grid-cols-2 gap-y-2 gap-x-4">
+                      <div><span className="text-muted-foreground">Sender:</span> {ev.sender_name}</div>
+                      <div><span className="text-muted-foreground">Amount:</span> Rp {ev.nominal.toLocaleString('id-ID')}</div>
+                      <div><span className="text-muted-foreground">Bank:</span> {ev.bank_name}</div>
+                      <div><span className="text-muted-foreground">Date:</span> {ev.transfer_date} {ev.transfer_time}</div>
+                      <div className="col-span-2 text-xs text-muted-foreground mt-1 pt-1 border-t">
+                        Hash: <code className="bg-slate-200 px-1 py-0.5 rounded">{ev.proof_hash?.substring(0, 16)}...</code>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         </div>

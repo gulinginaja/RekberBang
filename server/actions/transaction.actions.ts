@@ -39,9 +39,10 @@ function isValidTransition(currentStatus: TransactionStatus, nextStatus: Transac
   }
 
   const allowedTransitions: Record<TransactionStatus, TransactionStatus[]> = {
+    'PENDING_ADMIN_APPROVAL': ['CREATED', 'CANCELLED'],
     'CREATED': ['WAITING_PAYMENT', 'CANCELLED'], 
     'WAITING_PAYMENT': ['PAYMENT_UNDER_REVIEW', 'CANCELLED'],
-    'PAYMENT_UNDER_REVIEW': ['FUNDED'], 
+    'PAYMENT_UNDER_REVIEW': ['FUNDED', 'WAITING_PAYMENT'], 
     'FUNDED': ['DELIVERED'],
     'DELIVERING': ['DELIVERED', 'DISPUTED'], // Legacy
     'DELIVERED': ['CONFIRMED', 'DISPUTED'], 
@@ -56,6 +57,14 @@ function isValidTransition(currentStatus: TransactionStatus, nextStatus: Transac
 
   return allowedTransitions[currentStatus]?.includes(nextStatus) ?? false
 }
+
+// Internal helper to get admin chat IDs
+async function getAdminChatIds(supabase: any) {
+  const { data } = await supabase.from('users').select('telegram_id').in('role', ['admin', 'super_admin'])
+  return data?.map((u: any) => u.telegram_id).filter(Boolean) || []
+}
+
+import { notifyAdminNewTransaction, notifyAdminPaymentUploaded, notifyAdminDeliveryUploaded, notifyAdminDispute, notifyAdminReadyForRelease } from '@/lib/telegram/bot'
 
 export async function createTransaction(params: {
   title: string
@@ -76,12 +85,19 @@ export async function createTransaction(params: {
     seller_id: user.id,
     buyer_id: null,
     fee_split_mode: params.fee_split_mode || 'SPLIT_50_50',
-    status: 'CREATED'
+    status: 'PENDING_ADMIN_APPROVAL'
   }).select().single()
 
   if (error) return { error: error.message }
 
-  await logAuditAction(supabase, tx.id, user.id, 'TRANSACTION_CREATED', { amount: params.amount })
+  await logAuditAction(supabase, tx.id, user.id, 'TRANSACTION_CREATED_PENDING', { amount: params.amount })
+
+  // Fetch full user for username
+  const { data: currentUser } = await supabase.from('users').select('username').eq('id', user.id).single()
+  
+  // Notify Admins
+  const adminIds = await getAdminChatIds(supabase)
+  await notifyAdminNewTransaction(adminIds, tx, currentUser)
 
   return { success: true, transaction: tx }
 }
@@ -114,6 +130,58 @@ export async function cancelTransaction(transactionId: string) {
   return { success: true }
 }
 
+export async function approveTransaction(transactionId: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorized' }
+
+  // Admin Check
+  const { data: adminUser } = await supabase.from('users').select('role').eq('id', user.id).single()
+  if (adminUser?.role !== 'admin' && adminUser?.role !== 'super_admin') return { error: 'Unauthorized' }
+
+  const { data: tx, error: fetchErr } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
+  if (fetchErr || !tx) return { error: 'Transaction not found' }
+
+  if (tx.status !== 'PENDING_ADMIN_APPROVAL') return { error: 'Transaction is not pending approval' }
+
+  const { error: updateErr } = await supabase.from('transactions')
+    .update({ status: 'CREATED', updated_at: new Date().toISOString() })
+    .eq('id', transactionId)
+
+  if (updateErr) return { error: updateErr.message }
+
+  await logAuditAction(supabase, transactionId, user.id, 'TRANSACTION_APPROVED')
+  await sendTelegramNotification(tx.seller_id, `✅ <b>TRANSACTION APPROVED</b>\n\nYour transaction <b>${tx.title}</b> has been approved by the Admin. You can now invite the buyer.`)
+
+  return { success: true }
+}
+
+export async function rejectTransaction(transactionId: string, reason: string = 'Rejected by Admin') {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorized' }
+
+  // Admin Check
+  const { data: adminUser } = await supabase.from('users').select('role').eq('id', user.id).single()
+  if (adminUser?.role !== 'admin' && adminUser?.role !== 'super_admin') return { error: 'Unauthorized' }
+
+  const { data: tx, error: fetchErr } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
+  if (fetchErr || !tx) return { error: 'Transaction not found' }
+
+  if (tx.status !== 'PENDING_ADMIN_APPROVAL') return { error: 'Transaction is not pending approval' }
+
+  const { error: updateErr } = await supabase.from('transactions')
+    .update({ status: 'CANCELLED', updated_at: new Date().toISOString() })
+    .eq('id', transactionId)
+
+  if (updateErr) return { error: updateErr.message }
+
+  await logAuditAction(supabase, transactionId, user.id, 'TRANSACTION_REJECTED', { reason })
+  await sendTelegramNotification(tx.seller_id, `❌ <b>TRANSACTION REJECTED</b>\n\nYour transaction <b>${tx.title}</b> has been rejected by the Admin.\nReason: ${reason}`)
+
+  return { success: true }
+}
+
 export async function getTransactionDetail(transactionId: string) {
   const supabase = await createClient()
   
@@ -124,7 +192,7 @@ export async function getTransactionDetail(transactionId: string) {
       seller:seller_id (id, username, first_name),
       evidences (*),
       disputes (*),
-      dispute_messages (*, sender:sender_id(username, is_admin))
+      dispute_messages (*, sender:sender_id(username, role))
     `)
     .eq('id', transactionId)
     .single()
@@ -188,9 +256,17 @@ export async function submitPaymentProof(formData: FormData) {
   const { data: tx, error: txError } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
   if (txError || !tx) return { error: 'Transaction not found' }
   if (tx.buyer_id !== user.id) return { error: 'Only the buyer can upload payment proof' }
-  if (tx.status !== 'WAITING_PAYMENT' && tx.status !== 'PAYMENT_UNDER_REVIEW') {
+  if (tx.status !== 'WAITING_PAYMENT') {
     return { error: 'Transaction is not awaiting payment' }
   }
+
+  // Process OCR & Hash
+  const buffer = Buffer.from(await file.arrayBuffer())
+  const crypto = require('crypto')
+  const proofHash = crypto.createHash('sha256').update(buffer).digest('hex')
+  
+  const { extractTransactionData } = await import('@/lib/ocr')
+  const ocrData = await extractTransactionData(buffer)
 
   // Upload file
   const fileExt = file.name.split('.').pop()
@@ -202,13 +278,27 @@ export async function submitPaymentProof(formData: FormData) {
 
   if (uploadError) return { error: `Upload failed: ${uploadError.message}` }
 
+  // Expiration date: 3 days for payment proofs
+  const expiresAt = new Date()
+  expiresAt.setDate(expiresAt.getDate() + 3)
+
   // Record evidence
   const { error: evError } = await supabase.from('evidences').insert({
     transaction_id: transactionId,
-    uploader_id: user.id,
+    uploaded_by: user.id,
     file_url: uploadData.path,
-    file_type: file.type,
-    description: 'Payment Proof'
+    purpose: 'PAYMENT_PROOF',
+    proof_hash: proofHash,
+    nominal: ocrData.nominal,
+    sender_name: ocrData.sender_name,
+    sender_account: ocrData.sender_account,
+    recipient_name: ocrData.recipient_name,
+    recipient_account: ocrData.recipient_account,
+    bank_name: ocrData.bank_name,
+    transfer_date: ocrData.transfer_date,
+    transfer_time: ocrData.transfer_time,
+    verification_status: ocrData.verification_status,
+    expires_at: expiresAt.toISOString()
   })
   if (evError) return { error: evError.message }
 
@@ -220,7 +310,8 @@ export async function submitPaymentProof(formData: FormData) {
 
   await logAuditAction(supabase, transactionId, user.id, 'PAYMENT_PROOF_UPLOADED')
   
-  await sendTelegramNotification(ADMIN_CHAT_ID, `📸 <b>BUKTI TRANSFER DIUNGGAH</b>\n\nTransaksi: <b>${tx.title}</b>\nPembeli mengunggah bukti transfer. Silakan verifikasi di Dashboard Admin.`)
+  const adminIds = await getAdminChatIds(supabase)
+  await notifyAdminPaymentUploaded(adminIds, tx)
   await sendTelegramNotification(tx.seller_id, `⏳ <b>MENUNGGU VERIFIKASI ADMIN</b>\n\nPembeli telah mentransfer dana untuk <b>${tx.title}</b>. Menunggu Admin memverifikasi pembayaran.`)
 
   return { success: true }
@@ -232,8 +323,8 @@ export async function verifyPayment(transactionId: string) {
   if (!user) return { error: 'Unauthorized' }
 
   // Admin Check
-  const { data: publicUser } = await supabase.from('users').select('is_admin').eq('id', user.id).single()
-  if (!publicUser?.is_admin) return { error: 'Forbidden' }
+  const { data: publicUser } = await supabase.from('users').select('role').eq('id', user.id).single()
+  if (publicUser?.role !== 'admin' && publicUser?.role !== 'super_admin') return { error: 'Forbidden' }
 
   const { data: tx } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
   if (!tx || tx.status !== 'PAYMENT_UNDER_REVIEW') return { error: 'Invalid transaction status' }
@@ -256,8 +347,8 @@ export async function rejectPayment(transactionId: string, reason: string) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'Unauthorized' }
 
-  const { data: publicUser } = await supabase.from('users').select('is_admin').eq('id', user.id).single()
-  if (!publicUser?.is_admin) return { error: 'Forbidden' }
+  const { data: publicUser } = await supabase.from('users').select('role').eq('id', user.id).single()
+  if (publicUser?.role !== 'admin' && publicUser?.role !== 'super_admin') return { error: 'Forbidden' }
 
   const { data: tx } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
   if (!tx || tx.status !== 'PAYMENT_UNDER_REVIEW') return { error: 'Invalid transaction status' }
@@ -301,12 +392,16 @@ export async function submitDeliveryEvidence(formData: FormData) {
 
   if (uploadError) return { error: `Upload failed: ${uploadError.message}` }
 
+  // Delivery Evidence expires in 30 days
+  const expiresAt = new Date()
+  expiresAt.setDate(expiresAt.getDate() + 30)
+
   const { error: evError } = await supabase.from('evidences').insert({
     transaction_id: transactionId,
-    uploader_id: user.id,
+    uploaded_by: user.id,
     file_url: uploadData.path,
-    file_type: file.type,
-    description: `Delivery Proof: ${notes || 'No notes'}`
+    purpose: 'DELIVERY_PROOF',
+    expires_at: expiresAt.toISOString()
   })
   if (evError) return { error: evError.message }
 
@@ -317,6 +412,9 @@ export async function submitDeliveryEvidence(formData: FormData) {
 
   await logAuditAction(supabase, transactionId, user.id, 'SELLER_DELIVERY_SUBMITTED')
   
+  const adminIds = await getAdminChatIds(supabase)
+  await notifyAdminDeliveryUploaded(adminIds, tx)
+
   await sendTelegramNotification(tx.buyer_id, `📦 <b>BARANG DIKIRIM</b>\n\nPenjual telah mengirimkan pesanan: <b>${tx.title}</b>.\nSilakan periksa dan konfirmasi penerimaan di aplikasi.`)
 
   return { success: true }
@@ -338,8 +436,10 @@ export async function confirmDelivery(transactionId: string) {
   if (error) return { error: error.message }
   await logAuditAction(supabase, transactionId, user.id, 'BUYER_CONFIRMED_DELIVERY')
   
+  const adminIds = await getAdminChatIds(supabase)
+  await notifyAdminReadyForRelease(adminIds, tx)
+
   await sendTelegramNotification(tx.seller_id, `🎉 <b>PEMBELI MENGKONFIRMASI PENERIMAAN</b>\n\nPembeli telah menerima pesanan: <b>${tx.title}</b>.\nDana siap dicairkan oleh Admin.`)
-  await sendTelegramNotification(ADMIN_CHAT_ID, `💸 <b>DANA SIAP DILEPAS</b>\n\nTransaksi <b>${tx.title}</b> selesai. Silakan cairkan dana ke Penjual.`)
 
   return { success: true }
 }
@@ -382,9 +482,11 @@ export async function raiseDispute(transactionId: string, reason: string) {
   if (error) return { error: error.message }
   await logAuditAction(supabase, transactionId, user.id, 'DISPUTE_RAISED', { reason })
   
-  const opponentId = tx.buyer_id === user.id ? tx.seller_id : tx.buyer_id;
-  await sendTelegramNotification(opponentId, `⚠️ <b>DISPUTE DIAJUKAN</b>\n\nPihak lawan mengajukan dispute untuk transaksi <b>${tx.title}</b>. Dana dibekukan. Admin akan memediasi.`)
-  await sendTelegramNotification(ADMIN_CHAT_ID, `⚖️ <b>DISPUTE BARU!</b>\n\nTransaksi <b>${tx.title}</b> sedang bermasalah. Mohon segera periksa Dispute Center.`)
+  const adminIds = await getAdminChatIds(supabase)
+  await notifyAdminDispute(adminIds, tx, reason)
+
+  const otherPartyId = tx.buyer_id === user.id ? tx.seller_id : tx.buyer_id
+  await sendTelegramNotification(otherPartyId, `⚠️ <b>TRANSAKSI DALAM SENGKETA</b>\n\nTransaksi <b>${tx.title}</b> sedang dalam sengketa.\nAlasan: ${reason}`)
 
   return { success: true }
 }
@@ -400,8 +502,8 @@ export async function resolveDispute(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'Unauthorized' }
 
-  const { data: publicUser } = await supabase.from('users').select('is_admin').eq('id', user.id).single()
-  if (!publicUser?.is_admin) return { error: 'Forbidden' }
+  const { data: publicUser } = await supabase.from('users').select('role').eq('id', user.id).single()
+  if (publicUser?.role !== 'admin' && publicUser?.role !== 'super_admin') return { error: 'Forbidden' }
 
   const { data: tx } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
   if (!tx || tx.status !== 'DISPUTED') return { error: 'Transaction is not disputed' }
@@ -425,6 +527,12 @@ export async function resolveDispute(
     })
     .eq('transaction_id', transactionId)
 
+  // Trigger cleanup of dispute evidences
+  await supabase.from('evidences')
+    .update({ expires_at: new Date().toISOString() })
+    .eq('transaction_id', transactionId)
+    .eq('purpose', 'DISPUTE_EVIDENCE')
+
   await logAuditAction(supabase, transactionId, user.id, 'DISPUTE_RESOLVED', { resolution, notes, sellerAmount, buyerAmount })
   
   await sendTelegramNotification(tx.buyer_id, `⚖️ <b>DISPUTE SELESAI</b>\n\nResolusi untuk <b>${tx.title}</b> telah diputuskan oleh Admin. Cek aplikasi untuk detailnya.`)
@@ -446,8 +554,8 @@ export async function sendDisputeMessage(formData: FormData) {
   if (!transactionId || (!message && !file)) return { error: 'Message or file is required' }
 
   // Admin Check
-  const { data: publicUser } = await supabase.from('users').select('is_admin').eq('id', user.id).single()
-  const isAdmin = publicUser?.is_admin === true
+  const { data: publicUser } = await supabase.from('users').select('role').eq('id', user.id).single()
+  const isAdmin = publicUser?.role === 'admin' || publicUser?.role === 'super_admin'
 
   if (isInternal && !isAdmin) return { error: 'Only admins can send internal notes' }
 
@@ -463,6 +571,14 @@ export async function sendDisputeMessage(formData: FormData) {
       
     if (uploadError) return { error: uploadError.message }
     attachmentUrl = uploadData.path
+
+    await supabase.from('evidences').insert({
+      transaction_id: transactionId,
+      uploader_id: user.id,
+      file_url: uploadData.path,
+      purpose: 'DISPUTE_EVIDENCE',
+      expires_at: null // Retain until dispute is closed
+    })
   }
 
   const { error } = await supabase.from('dispute_messages').insert({
@@ -482,8 +598,8 @@ export async function releaseFunds(transactionId: string) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'Unauthorized' }
 
-  const { data: publicUser } = await supabase.from('users').select('is_admin').eq('id', user.id).single()
-  if (!publicUser?.is_admin) return { error: 'Forbidden' }
+  const { data: publicUser } = await supabase.from('users').select('role').eq('id', user.id).single()
+  if (publicUser?.role !== 'admin' && publicUser?.role !== 'super_admin') return { error: 'Forbidden' }
 
   const { data: tx } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
   if (!tx || tx.status !== 'CONFIRMED') return { error: 'Cannot release funds for this status. Buyer must CONFIRM first.' }
@@ -494,6 +610,9 @@ export async function releaseFunds(transactionId: string) {
 
   if (error) return { error: error.message }
   await logAuditAction(supabase, transactionId, user.id, 'FUNDS_RELEASED_BY_ADMIN')
+  
+  await sendTelegramNotification(tx.seller_id, `💸 <b>DANA TELAH DICAIRKAN</b>\n\nDana untuk transaksi <b>${tx.title}</b> telah berhasil ditransfer ke rekening Anda. Terima kasih telah menggunakan Rekber Bang!`)
+  
   return { success: true }
 }
 
