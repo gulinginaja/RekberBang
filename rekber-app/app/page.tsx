@@ -168,26 +168,47 @@ export default function LandingPage() {
                   </div>
                 </div>
                 
-                {/* Progress Timeline */}
-                <div className="relative pl-4 space-y-6 before:absolute before:inset-0 before:ml-[23px] before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-blue-600 before:via-slate-200 before:to-slate-200">
-                  <div className="relative flex items-center gap-4">
-                    <div className="absolute left-[-16px] w-4 h-4 rounded-full bg-blue-600 ring-4 ring-white"></div>
-                    <div>
-                      <p className="text-xs font-bold text-slate-900">Transaksi Dibuat</p>
-                      <p className="text-[10px] text-slate-500">10:42 AM</p>
+                {/* Step Progress Component */}
+                <div className="space-y-4 pt-2">
+                  <div className="flex items-start gap-4">
+                    <div className="mt-0.5 w-6 h-6 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center flex-shrink-0 shadow-sm">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-bold text-slate-900">Transaksi Dibuat</p>
                     </div>
                   </div>
-                  <div className="relative flex items-center gap-4">
-                    <div className="absolute left-[-16px] w-4 h-4 rounded-full bg-blue-600 ring-4 ring-blue-50 animate-pulse"></div>
-                    <div>
-                      <p className="text-xs font-bold text-blue-600">Pembayaran Diamankan</p>
-                      <p className="text-[10px] text-blue-500">Menunggu pengiriman barang...</p>
+                  
+                  <div className="flex items-start gap-4">
+                    <div className="mt-0.5 w-6 h-6 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center flex-shrink-0 shadow-sm">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-bold text-slate-900">Dana Diamankan</p>
+                      <p className="text-xs text-emerald-600 font-semibold mt-0.5">Uang 100% aman di Escrow</p>
                     </div>
                   </div>
-                  <div className="relative flex items-center gap-4 opacity-40">
-                    <div className="absolute left-[-16px] w-4 h-4 rounded-full bg-slate-200 ring-4 ring-white"></div>
-                    <div>
-                      <p className="text-xs font-bold text-slate-900">Barang Diterima</p>
+
+                  <div className="flex items-start gap-4">
+                    <div className="mt-0.5 w-6 h-6 rounded-full border-2 border-blue-200 bg-blue-50 flex items-center justify-center flex-shrink-0 shadow-sm">
+                      <div className="w-2 h-2 rounded-full bg-blue-600 animate-pulse"></div>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-bold text-blue-700">Menunggu Pengiriman</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-4 opacity-40">
+                    <div className="mt-0.5 w-6 h-6 rounded-full border-2 border-slate-200 flex items-center justify-center flex-shrink-0"></div>
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-slate-600">Barang Diterima</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-4 opacity-40">
+                    <div className="mt-0.5 w-6 h-6 rounded-full border-2 border-slate-200 flex items-center justify-center flex-shrink-0"></div>
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-slate-600">Dana Dicairkan</p>
                     </div>
                   </div>
                 </div>
