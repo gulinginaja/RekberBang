@@ -25,6 +25,7 @@ export interface User {
   is_admin: boolean
   trust_score: number
   created_at: string
+  terms_accepted_at?: string | null
 }
 
 export interface Transaction {
