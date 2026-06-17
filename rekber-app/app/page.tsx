@@ -11,7 +11,10 @@ import {
   FileText,
   Lock,
   Package,
-  Banknote
+  Banknote,
+  Coins,
+  AlertCircle,
+  ScrollText
 } from 'lucide-react'
 import {
   Accordion,
@@ -172,29 +175,55 @@ export default function LandingPage() {
       </section>
 
       {/* 4. FAQ & TERMS */}
-      <section className="px-4 py-20 bg-slate-50">
+      <section className="px-4 py-24 bg-white border-b border-slate-100">
         <div className="max-w-3xl mx-auto">
-          <h2 className="text-3xl font-bold text-slate-900 mb-8 text-center">Tanya Jawab & Syarat (S&K)</h2>
+          <div className="text-center mb-12">
+            <h2 className="text-3xl font-extrabold text-slate-900 mb-4 tracking-tight">Pertanyaan Umum</h2>
+            <p className="text-lg text-slate-600">Temukan jawaban cepat sebelum memulai transaksi.</p>
+          </div>
           
-          <Accordion className="w-full bg-white rounded-xl border px-4">
-            <AccordionItem value="item-1">
-              <AccordionTrigger className="text-left font-semibold">Berapa biaya (fee) Rekber Bang?</AccordionTrigger>
-              <AccordionContent className="text-slate-600">
+          <Accordion type="single" collapsible className="w-full space-y-4">
+            <AccordionItem value="item-1" className="border border-slate-200 bg-white rounded-2xl px-6 py-2 shadow-sm hover:border-blue-200 transition-colors data-[state=open]:border-blue-200 data-[state=open]:ring-1 data-[state=open]:ring-blue-100">
+              <AccordionTrigger className="text-left font-semibold text-lg text-slate-900 hover:no-underline group">
+                <div className="flex items-center gap-4">
+                  <div className="p-2 rounded-lg bg-blue-50 text-blue-600 group-hover:bg-blue-100 transition-colors">
+                    <Coins className="w-6 h-6" />
+                  </div>
+                  <span>Berapa biaya (fee) Rekber Bang?</span>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="text-slate-600 leading-relaxed pt-2 pb-4 text-base ml-14">
                 Fee disesuaikan dengan kesepakatan saat membuat transaksi. Bisa ditanggung penuh oleh Buyer, ditanggung Seller, atau dibagi 50:50. Sistem akan memotong otomatis saat pencairan.
               </AccordionContent>
             </AccordionItem>
-            <AccordionItem value="item-2">
-              <AccordionTrigger className="text-left font-semibold">Apa yang terjadi jika barang tidak dikirim?</AccordionTrigger>
-              <AccordionContent className="text-slate-600">
+
+            <AccordionItem value="item-2" className="border border-slate-200 bg-white rounded-2xl px-6 py-2 shadow-sm hover:border-blue-200 transition-colors data-[state=open]:border-blue-200 data-[state=open]:ring-1 data-[state=open]:ring-blue-100">
+              <AccordionTrigger className="text-left font-semibold text-lg text-slate-900 hover:no-underline group">
+                <div className="flex items-center gap-4">
+                  <div className="p-2 rounded-lg bg-orange-50 text-orange-600 group-hover:bg-orange-100 transition-colors">
+                    <AlertCircle className="w-6 h-6" />
+                  </div>
+                  <span>Apa yang terjadi jika barang tidak dikirim?</span>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="text-slate-600 leading-relaxed pt-2 pb-4 text-base ml-14">
                 Buyer dapat menekan tombol "Open Dispute". Dana akan dikunci sepenuhnya. Jika Seller terbukti tidak mengirim barang/akun, Admin akan melakukan REFUND 100% ke rekening Buyer.
               </AccordionContent>
             </AccordionItem>
-            <AccordionItem value="item-3">
-              <AccordionTrigger className="text-left font-semibold">Ringkasan Syarat & Ketentuan (Disclaimer)</AccordionTrigger>
-              <AccordionContent className="text-slate-600 space-y-2">
-                <ul className="list-disc pl-5 space-y-1">
-                  <li>Pengguna <b>wajib</b> memberikan bukti (evidence) valid berupa rekaman layar atau foto jika terjadi sengketa.</li>
-                  <li>Keputusan Admin dalam Dispute Center adalah <b>MUTLAK</b> dan tidak dapat diganggu gugat.</li>
+
+            <AccordionItem value="item-3" className="border border-slate-200 bg-white rounded-2xl px-6 py-2 shadow-sm hover:border-blue-200 transition-colors data-[state=open]:border-blue-200 data-[state=open]:ring-1 data-[state=open]:ring-blue-100">
+              <AccordionTrigger className="text-left font-semibold text-lg text-slate-900 hover:no-underline group">
+                <div className="flex items-center gap-4">
+                  <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100 transition-colors">
+                    <ScrollText className="w-6 h-6" />
+                  </div>
+                  <span>Ringkasan Syarat & Ketentuan (Disclaimer)</span>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="text-slate-600 leading-relaxed pt-2 pb-4 text-base ml-14">
+                <ul className="list-disc space-y-2">
+                  <li>Pengguna <b className="text-slate-800">wajib</b> memberikan bukti (evidence) valid berupa rekaman layar atau foto jika terjadi sengketa.</li>
+                  <li>Keputusan Admin dalam Dispute Center adalah <b className="text-slate-800">MUTLAK</b> dan tidak dapat diganggu gugat.</li>
                   <li>Uang yang sudah masuk (FUNDED) tidak bisa ditarik sepihak tanpa persetujuan pihak lawan atau putusan Admin.</li>
                   <li>Dilarang melakukan transaksi ilegal (narkoba, senjata, dll). Akun akan langsung diblokir dan dana disita.</li>
                 </ul>
