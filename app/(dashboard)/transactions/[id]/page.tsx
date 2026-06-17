@@ -81,7 +81,7 @@ export default async function TransactionDetailPage({ params }: { params: { id: 
 
           {transaction.status === 'WAITING_PAYMENT' && isBuyer && (
              <div className="w-full">
-               <EvidenceUploader transactionId={transaction.id} />
+               <EvidenceUploader transactionId={transaction.id} transactionAmount={transaction.amount} />
              </div>
           )}
           {transaction.status === 'WAITING_PAYMENT' && !isBuyer && (
