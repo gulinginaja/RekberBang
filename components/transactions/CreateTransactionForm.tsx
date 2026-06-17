@@ -73,15 +73,15 @@ export function CreateTransactionForm() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="fee_split_mode">Fee Payment</Label>
+            <Label htmlFor="fee_split_mode">Penanggungan Biaya Admin (5%)</Label>
             <Select name="fee_split_mode" defaultValue="SPLIT_50_50">
               <SelectTrigger>
-                <SelectValue placeholder="Select fee split" />
+                <SelectValue placeholder="Pilih skema biaya" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="SPLIT_50_50">Split 50/50</SelectItem>
-                <SelectItem value="BUYER_PAYS_ALL">Buyer Pays All</SelectItem>
-                <SelectItem value="SELLER_PAYS_ALL">Seller Pays All</SelectItem>
+                <SelectItem value="SPLIT_50_50">Dibagi Dua (50/50)</SelectItem>
+                <SelectItem value="BUYER_PAYS_ALL">Ditanggung Pembeli</SelectItem>
+                <SelectItem value="SELLER_PAYS_ALL">Ditanggung Penjual</SelectItem>
               </SelectContent>
             </Select>
           </div>

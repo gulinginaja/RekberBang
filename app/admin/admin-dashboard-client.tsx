@@ -29,6 +29,9 @@ export default function AdminDashboard({
   const [showPartialFormId, setShowPartialFormId] = useState<string | null>(null)
   const [sellerAmount, setSellerAmount] = useState<number>(0)
   const [buyerAmount, setBuyerAmount] = useState<number>(0)
+  
+  // Filter state
+  const [statusFilter, setStatusFilter] = useState<string>('ALL')
 
   async function handleAction(id: string, action: () => Promise<any>) {
     setLoadingId(id)
@@ -38,6 +41,10 @@ export default function AdminDashboard({
     setShowPartialFormId(null)
     router.refresh()
   }
+
+  const filteredTransactions = statusFilter === 'ALL' 
+    ? allTransactions 
+    : allTransactions.filter(tx => tx.status === statusFilter)
 
   const tabs = [
     { id: 'queue', label: 'Action Queue', count: queue.length },
@@ -178,7 +185,28 @@ export default function AdminDashboard({
 
       {/* TAB CONTENT: TRANSACTIONS */}
       {activeTab === 'transactions' && (
-        <div className="bg-white rounded-lg border overflow-hidden">
+        <div className="space-y-4">
+          <div className="flex items-center gap-4">
+            <Label>Filter Status:</Label>
+            <select 
+              className="border border-slate-300 rounded-md p-2 text-sm bg-white"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              <option value="ALL">Semua Status</option>
+              <option value="CREATED">CREATED</option>
+              <option value="WAITING_PAYMENT">WAITING_PAYMENT</option>
+              <option value="PAYMENT_UNDER_REVIEW">PAYMENT_UNDER_REVIEW</option>
+              <option value="FUNDED">FUNDED</option>
+              <option value="DELIVERED">DELIVERED</option>
+              <option value="COMPLETED">COMPLETED</option>
+              <option value="DISPUTED">DISPUTED</option>
+              <option value="CANCELLED">CANCELLED</option>
+              <option value="REFUNDED">REFUNDED</option>
+            </select>
+          </div>
+          
+          <div className="bg-white rounded-lg border overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
               <thead className="bg-slate-50 text-slate-500 uppercase text-xs">
@@ -192,7 +220,7 @@ export default function AdminDashboard({
                 </tr>
               </thead>
               <tbody>
-                {allTransactions.map(tx => (
+                {filteredTransactions.map(tx => (
                   <tr key={tx.id} className="border-b">
                     <td className="px-4 py-3 font-mono text-xs">{tx.id.substring(0,8)}</td>
                     <td className="px-4 py-3 truncate max-w-[150px]">{tx.title}</td>
