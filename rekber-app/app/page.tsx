@@ -8,7 +8,9 @@ import {
   ArrowRight,
   MessageCircle,
   FileText,
-  Lock
+  Lock,
+  Package,
+  Banknote
 } from 'lucide-react'
 import {
   Accordion,
@@ -52,37 +54,67 @@ export default function LandingPage() {
 
       {/* 2. HOW IT WORKS */}
       <section id="how-it-works" className="px-4 py-20 bg-slate-50">
-        <div className="max-w-5xl mx-auto">
+        <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold text-slate-900 mb-4">Bagaimana Cara Kerjanya?</h2>
-            <p className="text-slate-600">Alur transaksi yang dirancang untuk melindungi kedua belah pihak.</p>
+            <h2 className="text-3xl font-extrabold text-slate-900 mb-4 tracking-tight">Bagaimana Cara Kerjanya?</h2>
+            <p className="text-slate-600 text-lg">Alur transaksi yang dirancang untuk melindungi kedua belah pihak.</p>
           </div>
           
-          <div className="grid md:grid-cols-3 gap-8">
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center text-center">
-              <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-6">
-                <FileText className="w-8 h-8" />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {/* Step 1 */}
+            <div className="bg-white p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300 border border-slate-100 flex flex-col relative group text-left">
+              <div className="absolute top-8 right-8 w-8 h-8 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center text-sm font-bold text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-600 group-hover:border-blue-100 transition-colors">
+                1
               </div>
-              <h3 className="text-xl font-bold mb-2">1. Buat Transaksi</h3>
-              <p className="text-slate-600 text-sm">Seller membuat transaksi via Telegram Bot dan membagikan Link Invite kepada Buyer.</p>
+              <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-8 group-hover:scale-110 transition-transform duration-300">
+                <FileText className="w-10 h-10" />
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-900 mb-4 tracking-tight leading-tight">Buat Transaksi</h3>
+              <p className="text-slate-600 text-sm leading-relaxed">
+                Seller membuat transaksi via Mini App dan membagikan Link Invite kepada pihak Buyer.
+              </p>
             </div>
             
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center text-center relative">
-              <div className="hidden md:block absolute top-1/2 -left-4 w-8 border-t-2 border-dashed border-slate-300"></div>
-              <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-6">
-                <Wallet className="w-8 h-8" />
+            {/* Step 2 */}
+            <div className="bg-white p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300 border border-slate-100 flex flex-col relative group text-left">
+              <div className="absolute top-8 right-8 w-8 h-8 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center text-sm font-bold text-slate-400 group-hover:bg-amber-50 group-hover:text-amber-600 group-hover:border-amber-100 transition-colors">
+                2
               </div>
-              <h3 className="text-xl font-bold mb-2">2. Buyer Bayar</h3>
-              <p className="text-slate-600 text-sm">Buyer mentransfer dana ke rekening Admin. Uang disimpan dengan aman di sistem Escrow.</p>
-              <div className="hidden md:block absolute top-1/2 -right-4 w-8 border-t-2 border-dashed border-slate-300"></div>
+              <div className="w-20 h-20 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mb-8 group-hover:scale-110 transition-transform duration-300">
+                <Wallet className="w-10 h-10" />
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-900 mb-4 tracking-tight leading-tight">Buyer Melakukan Pembayaran</h3>
+              <p className="text-slate-600 text-sm leading-relaxed">
+                Buyer mentransfer dana ke rekening Admin. Uang disimpan dengan aman di sistem Escrow.
+              </p>
             </div>
             
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center text-center">
-              <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mb-6">
-                <ShieldCheck className="w-8 h-8" />
+            {/* Step 3 */}
+            <div className="bg-white p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300 border border-slate-100 flex flex-col relative group text-left">
+              <div className="absolute top-8 right-8 w-8 h-8 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center text-sm font-bold text-slate-400 group-hover:bg-indigo-50 group-hover:text-indigo-600 group-hover:border-indigo-100 transition-colors">
+                3
               </div>
-              <h3 className="text-xl font-bold mb-2">3. Kirim & Cair</h3>
-              <p className="text-slate-600 text-sm">Seller menyerahkan barang. Buyer mengonfirmasi penerimaan. Uang langsung dicairkan ke Seller.</p>
+              <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mb-8 group-hover:scale-110 transition-transform duration-300">
+                <Package className="w-10 h-10" />
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-900 mb-4 tracking-tight leading-tight">Seller Mengirim Barang/Jasa</h3>
+              <p className="text-slate-600 text-sm leading-relaxed">
+                Setelah dana diamankan, Seller mengirimkan barang atau jasa digital kepada pihak Buyer.
+              </p>
+            </div>
+
+            {/* Step 4 */}
+            <div className="bg-white p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300 border border-slate-100 flex flex-col relative group text-left">
+              <div className="absolute top-8 right-8 w-8 h-8 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center text-sm font-bold text-slate-400 group-hover:bg-emerald-50 group-hover:text-emerald-600 group-hover:border-emerald-100 transition-colors">
+                4
+              </div>
+              <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-8 group-hover:scale-110 transition-transform duration-300">
+                <Banknote className="w-10 h-10" />
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-900 mb-4 tracking-tight leading-tight">Dana Dicairkan</h3>
+              <p className="text-slate-600 text-sm leading-relaxed">
+                Buyer mengonfirmasi penerimaan. Uang akan langsung dicairkan ke rekening pihak Seller.
+              </p>
             </div>
           </div>
         </div>
