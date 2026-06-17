@@ -48,6 +48,10 @@ export async function authenticateWithTelegram(initData: string) {
     password
   })
 
+  if (error && error.message === 'fetch failed') {
+    return { error: `fetch failed. Supabase URL is: "${process.env.NEXT_PUBLIC_SUPABASE_URL}"` }
+  }
+
   // 4. Auto-Register if user doesn't exist
   if (error && error.message.includes('Invalid login credentials')) {
     const adminSupabase = createAdminClient()
@@ -67,23 +71,23 @@ export async function authenticateWithTelegram(initData: string) {
 
     if (signUpError || !newUser.user) {
       console.error('Auto-registration failed (auth):', signUpError)
-      return { error: 'Failed to auto-register user' }
+      return { error: `Failed to auto-register user: ${signUpError?.message || 'Unknown Auth Error'}` }
     }
 
-    // Insert into public.users
+    // Upsert into public.users
     const isAdmin = tgUser.id.toString() === process.env.ADMIN_TELEGRAM_ID
-    const { error: insertError } = await adminSupabase.from('users').insert({
+    const { error: insertError } = await adminSupabase.from('users').upsert({
       id: newUser.user.id,
       telegram_id: tgUser.id,
       username: tgUser.username,
       first_name: tgUser.first_name,
       photo_url: tgUser.photo_url || null,
       is_admin: isAdmin
-    })
+    }, { onConflict: 'telegram_id' })
 
     if (insertError) {
       console.error('Auto-registration failed (public):', insertError)
-      return { error: 'Failed to create user profile' }
+      return { error: `Failed to create user profile: ${insertError.message || insertError.details || 'Unknown DB Error'}` }
     }
 
     // Try login again after successful registration
