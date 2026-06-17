@@ -2,47 +2,58 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function updateSession(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({
-    request,
-  })
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
-          supabaseResponse = NextResponse.next({
-            request,
-          })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
-        },
-      },
+    // Gracefully fallback if environment variables are missing
+    if (!supabaseUrl || !supabaseKey) {
+      console.warn('Supabase environment variables missing in middleware')
+      return NextResponse.next({ request })
     }
-  )
 
-  // IMPORTANT: Avoid writing any logic between createServerClient and
-  // supabase.auth.getUser(). A simple mistake could make it very hard to debug
-  // issues with cross-browser cookies.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+    let supabaseResponse = NextResponse.next({
+      request,
+    })
 
-  const isAuthRoute = request.nextUrl.pathname.startsWith('/dashboard') || request.nextUrl.pathname.startsWith('/admin')
+    const supabase = createServerClient(
+      supabaseUrl,
+      supabaseKey,
+      {
+        cookies: {
+          getAll() {
+            return request.cookies.getAll()
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
+            supabaseResponse = NextResponse.next({
+              request,
+            })
+            cookiesToSet.forEach(({ name, value, options }) =>
+              supabaseResponse.cookies.set(name, value, options)
+            )
+          },
+        },
+      }
+    )
 
-  if (isAuthRoute && !user) {
-    // If the user is trying to access a protected route and is not authenticated,
-    // redirect them to the root page (auth initiation).
-    const url = request.nextUrl.clone()
-    url.pathname = '/'
-    return NextResponse.redirect(url)
+    const {
+      data: { user },
+      error
+    } = await supabase.auth.getUser()
+
+    const isAuthRoute = request.nextUrl.pathname.startsWith('/dashboard') || request.nextUrl.pathname.startsWith('/admin')
+
+    if (isAuthRoute && (!user || error)) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/'
+      return NextResponse.redirect(url)
+    }
+
+    return supabaseResponse
+  } catch (e) {
+    // Never crash the app due to a middleware error
+    console.error('Middleware error:', e)
+    return NextResponse.next({ request })
   }
-
-  return supabaseResponse
 }

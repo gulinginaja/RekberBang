@@ -150,24 +150,53 @@ export default function LandingPage() {
                 </div>
               </div>
             </div>
-            <div className="bg-slate-100 p-8 rounded-2xl">
+            <div className="bg-slate-100 p-8 rounded-2xl flex flex-col justify-center">
               {/* Mockup UI */}
-              <div className="bg-white rounded-xl shadow-lg border p-4 space-y-4">
-                <div className="flex items-center gap-3 border-b pb-3">
-                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
-                    <ShieldCheck className="w-5 h-5" />
+              <div className="bg-white rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 p-6 w-full max-w-sm mx-auto space-y-6">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center text-blue-600">
+                      <ShieldCheck className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="font-extrabold text-slate-900 text-sm">TRX-9942A</p>
+                      <p className="text-xs text-slate-500">Jual Beli Akun Game</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-bold text-sm">Status Transaksi</p>
-                    <p className="text-xs text-green-600 font-semibold">FUNDED (Uang Aman)</p>
+                  <div className="bg-emerald-50 text-emerald-600 px-3 py-1 rounded-full text-xs font-bold tracking-wide">
+                    FUNDED
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <div className="h-2 bg-slate-100 rounded w-full"></div>
-                  <div className="h-2 bg-slate-100 rounded w-4/5"></div>
-                  <div className="h-2 bg-slate-100 rounded w-full"></div>
+                
+                {/* Progress Timeline */}
+                <div className="relative pl-4 space-y-6 before:absolute before:inset-0 before:ml-[23px] before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-blue-600 before:via-slate-200 before:to-slate-200">
+                  <div className="relative flex items-center gap-4">
+                    <div className="absolute left-[-16px] w-4 h-4 rounded-full bg-blue-600 ring-4 ring-white"></div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-900">Transaksi Dibuat</p>
+                      <p className="text-[10px] text-slate-500">10:42 AM</p>
+                    </div>
+                  </div>
+                  <div className="relative flex items-center gap-4">
+                    <div className="absolute left-[-16px] w-4 h-4 rounded-full bg-blue-600 ring-4 ring-blue-50 animate-pulse"></div>
+                    <div>
+                      <p className="text-xs font-bold text-blue-600">Pembayaran Diamankan</p>
+                      <p className="text-[10px] text-blue-500">Menunggu pengiriman barang...</p>
+                    </div>
+                  </div>
+                  <div className="relative flex items-center gap-4 opacity-40">
+                    <div className="absolute left-[-16px] w-4 h-4 rounded-full bg-slate-200 ring-4 ring-white"></div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-900">Barang Diterima</p>
+                    </div>
+                  </div>
                 </div>
-                <Button className="w-full text-xs h-8" disabled>Menunggu Pengiriman...</Button>
+
+                <div className="pt-2">
+                  <Button className="w-full text-sm h-10 bg-slate-900 hover:bg-slate-800 text-white shadow-md">
+                    Hubungi Penjual
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
@@ -182,7 +211,7 @@ export default function LandingPage() {
             <p className="text-lg text-slate-600">Temukan jawaban cepat sebelum memulai transaksi.</p>
           </div>
           
-          <Accordion type="single" collapsible className="w-full space-y-4">
+          <Accordion className="w-full space-y-4">
             <AccordionItem value="item-1" className="border border-slate-200 bg-white rounded-2xl px-6 py-2 shadow-sm hover:border-blue-200 transition-colors data-[state=open]:border-blue-200 data-[state=open]:ring-1 data-[state=open]:ring-blue-100">
               <AccordionTrigger className="text-left font-semibold text-lg text-slate-900 hover:no-underline group">
                 <div className="flex items-center gap-4">

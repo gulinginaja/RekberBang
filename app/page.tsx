@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { StartTransactionButton } from '@/components/landing/start-transaction-button'
 import { Button } from '@/components/ui/button'
 import { 
   ShieldCheck, 
@@ -8,7 +9,12 @@ import {
   ArrowRight,
   MessageCircle,
   FileText,
-  Lock
+  Lock,
+  Package,
+  Banknote,
+  Coins,
+  AlertCircle,
+  ScrollText
 } from 'lucide-react'
 import {
   Accordion,
@@ -37,11 +43,7 @@ export default function LandingPage() {
         </p>
         
         <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto px-4">
-          <a href="https://t.me/RekberBangBot" target="_blank" rel="noreferrer" className="w-full sm:w-auto">
-            <Button size="lg" className="w-full h-12 px-8 text-base bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-200">
-              Mulai Transaksi (Buka Telegram) <ArrowRight className="w-4 h-4 ml-2" />
-            </Button>
-          </a>
+          <StartTransactionButton variant="primary" />
           <a href="#how-it-works" className="w-full sm:w-auto">
             <Button size="lg" variant="outline" className="w-full h-12 px-8 text-base">
               Pelajari Cara Kerjanya
@@ -52,37 +54,67 @@ export default function LandingPage() {
 
       {/* 2. HOW IT WORKS */}
       <section id="how-it-works" className="px-4 py-20 bg-slate-50">
-        <div className="max-w-5xl mx-auto">
+        <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold text-slate-900 mb-4">Bagaimana Cara Kerjanya?</h2>
-            <p className="text-slate-600">Alur transaksi yang dirancang untuk melindungi kedua belah pihak.</p>
+            <h2 className="text-3xl font-extrabold text-slate-900 mb-4 tracking-tight">Bagaimana Cara Kerjanya?</h2>
+            <p className="text-slate-600 text-lg">Alur transaksi yang dirancang untuk melindungi kedua belah pihak.</p>
           </div>
           
-          <div className="grid md:grid-cols-3 gap-8">
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center text-center">
-              <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-6">
-                <FileText className="w-8 h-8" />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {/* Step 1 */}
+            <div className="bg-white p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300 border border-slate-100 flex flex-col relative group text-left">
+              <div className="absolute top-8 right-8 w-8 h-8 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center text-sm font-bold text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-600 group-hover:border-blue-100 transition-colors">
+                1
               </div>
-              <h3 className="text-xl font-bold mb-2">1. Buat Transaksi</h3>
-              <p className="text-slate-600 text-sm">Seller membuat transaksi via Telegram Bot dan membagikan Link Invite kepada Buyer.</p>
+              <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-8 group-hover:scale-110 transition-transform duration-300">
+                <FileText className="w-10 h-10" />
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-900 mb-4 tracking-tight leading-tight">Buat Transaksi</h3>
+              <p className="text-slate-600 text-sm leading-relaxed">
+                Seller membuat transaksi via Mini App dan membagikan Link Invite kepada pihak Buyer.
+              </p>
             </div>
             
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center text-center relative">
-              <div className="hidden md:block absolute top-1/2 -left-4 w-8 border-t-2 border-dashed border-slate-300"></div>
-              <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-6">
-                <Wallet className="w-8 h-8" />
+            {/* Step 2 */}
+            <div className="bg-white p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300 border border-slate-100 flex flex-col relative group text-left">
+              <div className="absolute top-8 right-8 w-8 h-8 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center text-sm font-bold text-slate-400 group-hover:bg-amber-50 group-hover:text-amber-600 group-hover:border-amber-100 transition-colors">
+                2
               </div>
-              <h3 className="text-xl font-bold mb-2">2. Buyer Bayar</h3>
-              <p className="text-slate-600 text-sm">Buyer mentransfer dana ke rekening Admin. Uang disimpan dengan aman di sistem Escrow.</p>
-              <div className="hidden md:block absolute top-1/2 -right-4 w-8 border-t-2 border-dashed border-slate-300"></div>
+              <div className="w-20 h-20 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mb-8 group-hover:scale-110 transition-transform duration-300">
+                <Wallet className="w-10 h-10" />
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-900 mb-4 tracking-tight leading-tight">Buyer Melakukan Pembayaran</h3>
+              <p className="text-slate-600 text-sm leading-relaxed">
+                Buyer mentransfer dana ke rekening Admin. Uang disimpan dengan aman di sistem Escrow.
+              </p>
             </div>
             
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center text-center">
-              <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mb-6">
-                <ShieldCheck className="w-8 h-8" />
+            {/* Step 3 */}
+            <div className="bg-white p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300 border border-slate-100 flex flex-col relative group text-left">
+              <div className="absolute top-8 right-8 w-8 h-8 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center text-sm font-bold text-slate-400 group-hover:bg-indigo-50 group-hover:text-indigo-600 group-hover:border-indigo-100 transition-colors">
+                3
               </div>
-              <h3 className="text-xl font-bold mb-2">3. Kirim & Cair</h3>
-              <p className="text-slate-600 text-sm">Seller menyerahkan barang. Buyer mengonfirmasi penerimaan. Uang langsung dicairkan ke Seller.</p>
+              <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mb-8 group-hover:scale-110 transition-transform duration-300">
+                <Package className="w-10 h-10" />
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-900 mb-4 tracking-tight leading-tight">Seller Mengirim Barang/Jasa</h3>
+              <p className="text-slate-600 text-sm leading-relaxed">
+                Setelah dana diamankan, Seller mengirimkan barang atau jasa digital kepada pihak Buyer.
+              </p>
+            </div>
+
+            {/* Step 4 */}
+            <div className="bg-white p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300 border border-slate-100 flex flex-col relative group text-left">
+              <div className="absolute top-8 right-8 w-8 h-8 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center text-sm font-bold text-slate-400 group-hover:bg-emerald-50 group-hover:text-emerald-600 group-hover:border-emerald-100 transition-colors">
+                4
+              </div>
+              <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-8 group-hover:scale-110 transition-transform duration-300">
+                <Banknote className="w-10 h-10" />
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-900 mb-4 tracking-tight leading-tight">Dana Dicairkan</h3>
+              <p className="text-slate-600 text-sm leading-relaxed">
+                Buyer mengonfirmasi penerimaan. Uang akan langsung dicairkan ke rekening pihak Seller.
+              </p>
             </div>
           </div>
         </div>
@@ -118,24 +150,53 @@ export default function LandingPage() {
                 </div>
               </div>
             </div>
-            <div className="bg-slate-100 p-8 rounded-2xl">
+            <div className="bg-slate-100 p-8 rounded-2xl flex flex-col justify-center">
               {/* Mockup UI */}
-              <div className="bg-white rounded-xl shadow-lg border p-4 space-y-4">
-                <div className="flex items-center gap-3 border-b pb-3">
-                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
-                    <ShieldCheck className="w-5 h-5" />
+              <div className="bg-white rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 p-6 w-full max-w-sm mx-auto space-y-6">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center text-blue-600">
+                      <ShieldCheck className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="font-extrabold text-slate-900 text-sm">TRX-9942A</p>
+                      <p className="text-xs text-slate-500">Jual Beli Akun Game</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-bold text-sm">Status Transaksi</p>
-                    <p className="text-xs text-green-600 font-semibold">FUNDED (Uang Aman)</p>
+                  <div className="bg-emerald-50 text-emerald-600 px-3 py-1 rounded-full text-xs font-bold tracking-wide">
+                    FUNDED
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <div className="h-2 bg-slate-100 rounded w-full"></div>
-                  <div className="h-2 bg-slate-100 rounded w-4/5"></div>
-                  <div className="h-2 bg-slate-100 rounded w-full"></div>
+                
+                {/* Progress Timeline */}
+                <div className="relative pl-4 space-y-6 before:absolute before:inset-0 before:ml-[23px] before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-blue-600 before:via-slate-200 before:to-slate-200">
+                  <div className="relative flex items-center gap-4">
+                    <div className="absolute left-[-16px] w-4 h-4 rounded-full bg-blue-600 ring-4 ring-white"></div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-900">Transaksi Dibuat</p>
+                      <p className="text-[10px] text-slate-500">10:42 AM</p>
+                    </div>
+                  </div>
+                  <div className="relative flex items-center gap-4">
+                    <div className="absolute left-[-16px] w-4 h-4 rounded-full bg-blue-600 ring-4 ring-blue-50 animate-pulse"></div>
+                    <div>
+                      <p className="text-xs font-bold text-blue-600">Pembayaran Diamankan</p>
+                      <p className="text-[10px] text-blue-500">Menunggu pengiriman barang...</p>
+                    </div>
+                  </div>
+                  <div className="relative flex items-center gap-4 opacity-40">
+                    <div className="absolute left-[-16px] w-4 h-4 rounded-full bg-slate-200 ring-4 ring-white"></div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-900">Barang Diterima</p>
+                    </div>
+                  </div>
                 </div>
-                <Button className="w-full text-xs h-8" disabled>Menunggu Pengiriman...</Button>
+
+                <div className="pt-2">
+                  <Button className="w-full text-sm h-10 bg-slate-900 hover:bg-slate-800 text-white shadow-md">
+                    Hubungi Penjual
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
@@ -143,29 +204,55 @@ export default function LandingPage() {
       </section>
 
       {/* 4. FAQ & TERMS */}
-      <section className="px-4 py-20 bg-slate-50">
+      <section className="px-4 py-24 bg-white border-b border-slate-100">
         <div className="max-w-3xl mx-auto">
-          <h2 className="text-3xl font-bold text-slate-900 mb-8 text-center">Tanya Jawab & Syarat (S&K)</h2>
+          <div className="text-center mb-12">
+            <h2 className="text-3xl font-extrabold text-slate-900 mb-4 tracking-tight">Pertanyaan Umum</h2>
+            <p className="text-lg text-slate-600">Temukan jawaban cepat sebelum memulai transaksi.</p>
+          </div>
           
-          <Accordion className="w-full bg-white rounded-xl border px-4">
-            <AccordionItem value="item-1">
-              <AccordionTrigger className="text-left font-semibold">Berapa biaya (fee) Rekber Bang?</AccordionTrigger>
-              <AccordionContent className="text-slate-600">
+          <Accordion className="w-full space-y-4">
+            <AccordionItem value="item-1" className="border border-slate-200 bg-white rounded-2xl px-6 py-2 shadow-sm hover:border-blue-200 transition-colors data-[state=open]:border-blue-200 data-[state=open]:ring-1 data-[state=open]:ring-blue-100">
+              <AccordionTrigger className="text-left font-semibold text-lg text-slate-900 hover:no-underline group">
+                <div className="flex items-center gap-4">
+                  <div className="p-2 rounded-lg bg-blue-50 text-blue-600 group-hover:bg-blue-100 transition-colors">
+                    <Coins className="w-6 h-6" />
+                  </div>
+                  <span>Berapa biaya (fee) Rekber Bang?</span>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="text-slate-600 leading-relaxed pt-2 pb-4 text-base ml-14">
                 Fee disesuaikan dengan kesepakatan saat membuat transaksi. Bisa ditanggung penuh oleh Buyer, ditanggung Seller, atau dibagi 50:50. Sistem akan memotong otomatis saat pencairan.
               </AccordionContent>
             </AccordionItem>
-            <AccordionItem value="item-2">
-              <AccordionTrigger className="text-left font-semibold">Apa yang terjadi jika barang tidak dikirim?</AccordionTrigger>
-              <AccordionContent className="text-slate-600">
+
+            <AccordionItem value="item-2" className="border border-slate-200 bg-white rounded-2xl px-6 py-2 shadow-sm hover:border-blue-200 transition-colors data-[state=open]:border-blue-200 data-[state=open]:ring-1 data-[state=open]:ring-blue-100">
+              <AccordionTrigger className="text-left font-semibold text-lg text-slate-900 hover:no-underline group">
+                <div className="flex items-center gap-4">
+                  <div className="p-2 rounded-lg bg-orange-50 text-orange-600 group-hover:bg-orange-100 transition-colors">
+                    <AlertCircle className="w-6 h-6" />
+                  </div>
+                  <span>Apa yang terjadi jika barang tidak dikirim?</span>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="text-slate-600 leading-relaxed pt-2 pb-4 text-base ml-14">
                 Buyer dapat menekan tombol "Open Dispute". Dana akan dikunci sepenuhnya. Jika Seller terbukti tidak mengirim barang/akun, Admin akan melakukan REFUND 100% ke rekening Buyer.
               </AccordionContent>
             </AccordionItem>
-            <AccordionItem value="item-3">
-              <AccordionTrigger className="text-left font-semibold">Ringkasan Syarat & Ketentuan (Disclaimer)</AccordionTrigger>
-              <AccordionContent className="text-slate-600 space-y-2">
-                <ul className="list-disc pl-5 space-y-1">
-                  <li>Pengguna <b>wajib</b> memberikan bukti (evidence) valid berupa rekaman layar atau foto jika terjadi sengketa.</li>
-                  <li>Keputusan Admin dalam Dispute Center adalah <b>MUTLAK</b> dan tidak dapat diganggu gugat.</li>
+
+            <AccordionItem value="item-3" className="border border-slate-200 bg-white rounded-2xl px-6 py-2 shadow-sm hover:border-blue-200 transition-colors data-[state=open]:border-blue-200 data-[state=open]:ring-1 data-[state=open]:ring-blue-100">
+              <AccordionTrigger className="text-left font-semibold text-lg text-slate-900 hover:no-underline group">
+                <div className="flex items-center gap-4">
+                  <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100 transition-colors">
+                    <ScrollText className="w-6 h-6" />
+                  </div>
+                  <span>Ringkasan Syarat & Ketentuan (Disclaimer)</span>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="text-slate-600 leading-relaxed pt-2 pb-4 text-base ml-14">
+                <ul className="list-disc space-y-2">
+                  <li>Pengguna <b className="text-slate-800">wajib</b> memberikan bukti (evidence) valid berupa rekaman layar atau foto jika terjadi sengketa.</li>
+                  <li>Keputusan Admin dalam Dispute Center adalah <b className="text-slate-800">MUTLAK</b> dan tidak dapat diganggu gugat.</li>
                   <li>Uang yang sudah masuk (FUNDED) tidak bisa ditarik sepihak tanpa persetujuan pihak lawan atau putusan Admin.</li>
                   <li>Dilarang melakukan transaksi ilegal (narkoba, senjata, dll). Akun akan langsung diblokir dan dana disita.</li>
                 </ul>
@@ -180,11 +267,7 @@ export default function LandingPage() {
         <div className="max-w-2xl mx-auto space-y-8">
           <h2 className="text-3xl md:text-4xl font-bold">Siap Bertransaksi dengan Aman?</h2>
           <p className="text-blue-100 text-lg">Tidak perlu khawatir ditipu lagi. Gunakan Rekber Bang sekarang secara gratis langsung dari Telegram Anda.</p>
-          <a href="https://t.me/RekberBangBot" target="_blank" rel="noreferrer" className="inline-block">
-            <Button size="lg" className="bg-white text-blue-600 hover:bg-slate-100 h-14 px-8 text-lg font-bold">
-              Buka Telegram Bot <MessageCircle className="w-5 h-5 ml-2" />
-            </Button>
-          </a>
+          <StartTransactionButton variant="secondary" />
         </div>
       </section>
 
