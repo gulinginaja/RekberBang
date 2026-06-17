@@ -34,16 +34,23 @@ export async function POST(req: Request) {
       const text = msg.text.trim();
       const chatId = msg.chat.id;
 
-      if (text === '/start') {
-        const welcomeMsg = `<b>👋 SELAMAT DATANG DI REKBER BANG!</b>\n\n` +
-          `Sistem Escrow Teraman & Tercepat di Telegram untuk melindungi transaksi jual-beli Anda.\n\n` +
-          `🛡️ <i>Fitur Utama:</i>\n` +
-          `• <b>Uang 100% Aman</b> ditahan di sistem.\n` +
-          `• <b>Dispute Center</b> (Resolusi Sengketa) jika bermasalah.\n` +
-          `• <b>Realtime State Machine</b> (Tanpa nunggu chat admin manual!)\n\n` +
-          `👇 <b>Klik tombol di bawah untuk Membuka Aplikasi Mini & Memulai Transaksi:</b>`;
+      if (text.startsWith('/start')) {
+        const payload = text.split(' ')[1] || '';
+        const welcomeMsg = `🛡 <b>Rekber Bang</b>\n\nTransaksi Aman, Tanpa Was-Was\n\nA modern escrow platform for safe online transactions.`;
 
-        await sendTelegramMessage(chatId, welcomeMsg, defaultInlineMenu);
+        const appUrl = payload 
+          ? `https://rekber-bang.vercel.app/?startapp=${payload}`
+          : `https://rekber-bang.vercel.app/`;
+
+        const startMenu = {
+          inline_keyboard: [
+            [
+              { text: "🚀 Buka Rekber Bang", web_app: { url: appUrl } }
+            ]
+          ]
+        };
+
+        await sendTelegramMessage(chatId, welcomeMsg, startMenu);
       } else if (text === '/stats') {
         await handleStatsCommand(chatId);
       } else if (text === '/rooms') {
