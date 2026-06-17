@@ -34,7 +34,7 @@ export function TransactionActionButtons({
   return (
     <div className="flex flex-col gap-2 mt-4">
       {/* BUYER ACTIONS */}
-      {role === 'buyer' && status === 'DELIVERING' && (
+      {role === 'buyer' && status === 'DELIVERED' && (
         <div className="flex flex-col gap-2">
           <Button onClick={() => handleAction(() => confirmDelivery(transactionId))} disabled={loading} className="bg-green-600 hover:bg-green-700">
             Confirm Item Received
@@ -53,7 +53,7 @@ export function TransactionActionButtons({
       )}
 
       {/* DISPUTE (Both) */}
-      {(status === 'DELIVERING' || status === 'DELIVERED') && (
+      {(status === 'DELIVERED' || status === 'CONFIRMED') && (
         <Button 
           variant="destructive" 
           onClick={() => {

@@ -32,22 +32,25 @@ async function logAuditAction(supabase: any, transactionId: string, actorId: str
 function isValidTransition(currentStatus: TransactionStatus, nextStatus: TransactionStatus, isAdmin: boolean = false): boolean {
   if (isAdmin) {
     // Admins have override privileges for dispute resolution and funding
-    const adminAllowed = [
-      'PAYMENT_UNDER_REVIEW', 'FUNDED', 'RELEASED', 'REFUNDED', 'DISPUTED', 'CANCELLED'
+    const adminAllowed: TransactionStatus[] = [
+      'PAYMENT_UNDER_REVIEW', 'FUNDED', 'COMPLETED', 'REFUNDED', 'RESOLVED_PARTIAL', 'DISPUTED', 'CANCELLED', 'RELEASED'
     ]
     if (adminAllowed.includes(nextStatus)) return true
   }
 
   const allowedTransitions: Record<TransactionStatus, TransactionStatus[]> = {
-    'CREATED': ['WAITING_PAYMENT', 'CANCELLED'], // Waiting acceptance is now skipped, seller goes straight to WAITING_PAYMENT upon accept
+    'CREATED': ['WAITING_PAYMENT', 'CANCELLED'], 
     'WAITING_PAYMENT': ['PAYMENT_UNDER_REVIEW', 'CANCELLED'],
-    'PAYMENT_UNDER_REVIEW': ['FUNDED'], // Admin only, but mapped here
-    'FUNDED': ['DELIVERING'],
-    'DELIVERING': ['DELIVERED', 'DISPUTED'],
-    'DELIVERED': ['RELEASED', 'DISPUTED'], // Buyer releases implicitly via Confirm
-    'DISPUTED': ['RELEASED', 'REFUNDED'],
+    'PAYMENT_UNDER_REVIEW': ['FUNDED'], 
+    'FUNDED': ['DELIVERED'],
+    'DELIVERING': ['DELIVERED', 'DISPUTED'], // Legacy
+    'DELIVERED': ['CONFIRMED', 'DISPUTED'], 
+    'CONFIRMED': ['COMPLETED'],
+    'DISPUTED': ['COMPLETED', 'REFUNDED', 'RESOLVED_PARTIAL'],
+    'COMPLETED': [],
     'RELEASED': [],
     'REFUNDED': [],
+    'RESOLVED_PARTIAL': [],
     'CANCELLED': []
   }
 
@@ -308,7 +311,7 @@ export async function submitDeliveryEvidence(formData: FormData) {
   if (evError) return { error: evError.message }
 
   const { error: updateErr } = await supabase.from('transactions')
-    .update({ status: 'DELIVERING', updated_at: new Date().toISOString() })
+    .update({ status: 'DELIVERED', updated_at: new Date().toISOString() })
     .eq('id', transactionId)
   if (updateErr) return { error: updateErr.message }
 
@@ -325,11 +328,11 @@ export async function confirmDelivery(transactionId: string) {
   if (!user) return { error: 'Unauthorized' }
 
   const { data: tx } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
-  if (!tx || tx.status !== 'DELIVERING') return { error: 'Transaction is not in delivery' }
+  if (!tx || tx.status !== 'DELIVERED') return { error: 'Transaction is not in delivery' }
   if (tx.buyer_id !== user.id) return { error: 'Only the buyer can confirm delivery' }
 
   const { error } = await supabase.from('transactions')
-    .update({ status: 'DELIVERED', updated_at: new Date().toISOString() })
+    .update({ status: 'CONFIRMED', updated_at: new Date().toISOString() })
     .eq('id', transactionId)
 
   if (error) return { error: error.message }
@@ -347,7 +350,7 @@ export async function requestClarification(transactionId: string, message: strin
   if (!user) return { error: 'Unauthorized' }
 
   const { data: tx } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
-  if (!tx || !['DELIVERING', 'DELIVERED'].includes(tx.status)) return { error: 'Cannot request clarification at this stage' }
+  if (!tx || !['DELIVERED', 'CONFIRMED'].includes(tx.status)) return { error: 'Cannot request clarification at this stage' }
   if (tx.buyer_id !== user.id && tx.seller_id !== user.id) return { error: 'Unauthorized' }
 
   await logAuditAction(supabase, transactionId, user.id, 'CLARIFICATION_REQUESTED', { message })
@@ -360,7 +363,7 @@ export async function raiseDispute(transactionId: string, reason: string) {
   if (!user) return { error: 'Unauthorized' }
 
   const { data: tx } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
-  if (!tx || !['DELIVERING', 'DELIVERED'].includes(tx.status)) return { error: 'Cannot dispute at this stage' }
+  if (!tx || !['DELIVERED', 'CONFIRMED'].includes(tx.status)) return { error: 'Cannot dispute at this stage' }
   if (tx.buyer_id !== user.id && tx.seller_id !== user.id) return { error: 'Unauthorized' }
 
   // Create dispute record
@@ -403,7 +406,7 @@ export async function resolveDispute(
   const { data: tx } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
   if (!tx || tx.status !== 'DISPUTED') return { error: 'Transaction is not disputed' }
 
-  const newStatus = resolution === 'RELEASE_TO_SELLER' ? 'RELEASED' : 
+  const newStatus = resolution === 'RELEASE_TO_SELLER' ? 'COMPLETED' : 
                     resolution === 'REFUND_TO_BUYER' ? 'REFUNDED' : 'RESOLVED_PARTIAL'
 
   const { error } = await supabase.from('transactions')
@@ -483,10 +486,10 @@ export async function releaseFunds(transactionId: string) {
   if (!publicUser?.is_admin) return { error: 'Forbidden' }
 
   const { data: tx } = await supabase.from('transactions').select('*').eq('id', transactionId).single()
-  if (!tx || tx.status !== 'DELIVERED') return { error: 'Cannot release funds for this status' }
+  if (!tx || tx.status !== 'CONFIRMED') return { error: 'Cannot release funds for this status. Buyer must CONFIRM first.' }
 
   const { error } = await supabase.from('transactions')
-    .update({ status: 'RELEASED', updated_at: new Date().toISOString() })
+    .update({ status: 'COMPLETED', updated_at: new Date().toISOString() })
     .eq('id', transactionId)
 
   if (error) return { error: error.message }

@@ -133,7 +133,7 @@ export default function AdminDashboard({
                     </div>
                   )}
 
-                  {tx.status === 'DELIVERED' && (
+                  {tx.status === 'CONFIRMED' && (
                     <Button onClick={() => handleAction(tx.id, () => releaseFunds(tx.id))} disabled={loadingId === tx.id} className="w-full bg-blue-600 hover:bg-blue-700">
                       Release Funds to Seller
                     </Button>
@@ -199,8 +199,10 @@ export default function AdminDashboard({
               <option value="PAYMENT_UNDER_REVIEW">PAYMENT_UNDER_REVIEW</option>
               <option value="FUNDED">FUNDED</option>
               <option value="DELIVERED">DELIVERED</option>
-              <option value="COMPLETED">COMPLETED</option>
+              <option value="CONFIRMED">CONFIRMED</option>
               <option value="DISPUTED">DISPUTED</option>
+              <option value="RESOLVED_PARTIAL">RESOLVED_PARTIAL</option>
+              <option value="COMPLETED">COMPLETED</option>
               <option value="CANCELLED">CANCELLED</option>
               <option value="REFUNDED">REFUNDED</option>
             </select>

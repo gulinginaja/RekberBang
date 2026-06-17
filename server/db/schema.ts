@@ -7,9 +7,12 @@ export type TransactionStatus =
   | 'FUNDED'
   | 'DELIVERING'
   | 'DELIVERED'
+  | 'CONFIRMED'
   | 'DISPUTED'
   | 'RELEASED'
   | 'REFUNDED'
+  | 'RESOLVED_PARTIAL'
+  | 'COMPLETED'
   | 'CANCELLED'
 
 export type DisputeStatus = 'OPEN' | 'RESOLVED_BUYER' | 'RESOLVED_SELLER' | 'ESCALATED'
