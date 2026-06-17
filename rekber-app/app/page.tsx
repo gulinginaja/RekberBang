@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { StartTransactionButton } from '@/components/landing/start-transaction-button'
 import { Button } from '@/components/ui/button'
 import { 
   ShieldCheck, 
@@ -39,11 +40,7 @@ export default function LandingPage() {
         </p>
         
         <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto px-4">
-          <Link href="/dashboard" className="w-full sm:w-auto">
-            <Button size="lg" className="w-full h-12 px-8 text-base bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-200">
-              Mulai Transaksi (Dashboard) <ArrowRight className="w-4 h-4 ml-2" />
-            </Button>
-          </Link>
+          <StartTransactionButton variant="primary" />
           <a href="#how-it-works" className="w-full sm:w-auto">
             <Button size="lg" variant="outline" className="w-full h-12 px-8 text-base">
               Pelajari Cara Kerjanya
@@ -212,11 +209,7 @@ export default function LandingPage() {
         <div className="max-w-2xl mx-auto space-y-8">
           <h2 className="text-3xl md:text-4xl font-bold">Siap Bertransaksi dengan Aman?</h2>
           <p className="text-blue-100 text-lg">Tidak perlu khawatir ditipu lagi. Gunakan Rekber Bang sekarang secara gratis langsung dari Telegram Anda.</p>
-          <Link href="/dashboard" className="inline-block">
-            <Button size="lg" className="bg-white text-blue-600 hover:bg-slate-100 h-14 px-8 text-lg font-bold">
-              Buka Dashboard <ArrowRight className="w-5 h-5 ml-2" />
-            </Button>
-          </Link>
+          <StartTransactionButton variant="secondary" />
         </div>
       </section>
 
