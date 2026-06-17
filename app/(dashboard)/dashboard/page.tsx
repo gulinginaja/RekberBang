@@ -20,7 +20,7 @@ export default async function DashboardOverview() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-3xl font-bold tracking-tight">Overview</h2>
-        <Link href="/dashboard/transactions/new">
+        <Link href="/transactions/create">
           <Button className="bg-blue-600 hover:bg-blue-700 text-white">New Transaction</Button>
         </Link>
       </div>

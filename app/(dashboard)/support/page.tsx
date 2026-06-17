@@ -18,7 +18,7 @@ export default function SupportPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <Accordion type="single" collapsible className="w-full">
+          <Accordion className="w-full">
             <AccordionItem value="item-1">
               <AccordionTrigger className="text-left font-medium">Berapa biaya admin Rekber Bang?</AccordionTrigger>
               <AccordionContent className="text-muted-foreground">

@@ -68,7 +68,7 @@ export async function POST(req: Request) {
 }
 
 async function handleStatsCommand(chatId: number) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: dbStats, error } = await supabase.from('rekber_stats').select('*').single();
   
   if (!error && dbStats) {
@@ -85,7 +85,7 @@ async function handleStatsCommand(chatId: number) {
 }
 
 async function handleRoomsCommand(chatId: number) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: dbRooms, error } = await supabase.from('rekber_rooms').select('*').order('id');
   
   if (!error && dbRooms && dbRooms.length > 0) {
